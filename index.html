@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -40,36 +39,22 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .leverage{color:var(--green);font-weight:700}
 .leverage-panel{border:1px solid var(--green);background:#102b28;border-radius:12px;padding:13px;margin:12px 0}
 .leverage-title{font-size:25px;font-weight:800;color:var(--green)}
-@media(max-width:560px){
- .grid{grid-template-columns:1fr}
- .stats{display:grid;grid-template-columns:1fr 1fr}
-}
+.trailing-panel{border:1px solid #49618b;background:#101d35;border-radius:12px;padding:13px;margin:12px 0}
+@media(max-width:560px){.grid{grid-template-columns:1fr}.stats{display:grid;grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
-
 <header>
 <h1>CART3R.JAILBREAK</h1>
-<div class="sub">Scanner Solana • Levier simulé réglable • Aucun ordre réel</div>
+<div class="sub">Scanner Solana • Levier simulé réglable • Trailing stop • Aucun ordre réel</div>
 </header>
-
 <main>
-
 <section class="panel">
 <h2>Filtres de détection</h2>
 <div class="grid">
-<div>
-<label for="minLiq">Liquidité minimum (USD)</label>
-<input id="minLiq" type="number" value="10000" min="0">
-</div>
-<div>
-<label for="minVol">Volume 24 h minimum (USD)</label>
-<input id="minVol" type="number" value="5000" min="0">
-</div>
-<div>
-<label for="maxDrop">Baisse maximum 24 h (%)</label>
-<input id="maxDrop" type="number" value="10" min="0">
-</div>
+<div><label for="minLiq">Liquidité minimum (USD)</label><input id="minLiq" type="number" value="10000" min="0"></div>
+<div><label for="minVol">Volume 24 h minimum (USD)</label><input id="minVol" type="number" value="5000" min="0"></div>
+<div><label for="maxDrop">Baisse maximum 24 h (%)</label><input id="maxDrop" type="number" value="10" min="0"></div>
 </div>
 <button onclick="applyFilters()">Appliquer les filtres</button>
 <button class="secondary" onclick="loadPools()">Actualiser les données</button>
@@ -79,25 +64,17 @@ button:disabled{opacity:.45;cursor:not-allowed}
 <section class="panel">
 <h2>Résultats des pools</h2>
 <div class="stats">
-<div class="stat">
-<small>Pools reçus</small>
-<strong id="received">0</strong>
-</div>
-<div class="stat">
-<small>Pools retenus</small>
-<strong id="passed">0</strong>
-</div>
+<div class="stat"><small>Pools reçus</small><strong id="received">0</strong></div>
+<div class="stat"><small>Pools retenus</small><strong id="passed">0</strong></div>
 </div>
 <div id="poolList" class="notice" style="margin-top:12px">Aucune donnée chargée.</div>
 </section>
 
 <section class="panel">
 <h2>Portefeuille virtuel CART3R</h2>
-
 <div class="leverage-panel">
 <div class="leverage">SÉLECTEUR DE LEVIER SIMULÉ</div>
 <div class="leverage-title" id="leverageTitle">x3</div>
-
 <label for="leverageSelect">Choisir ton multiplicateur</label>
 <select id="leverageSelect" onchange="changeLeverage(this.value)">
 <option value="1">x1 — sans multiplicateur</option>
@@ -105,52 +82,41 @@ button:disabled{opacity:.45;cursor:not-allowed}
 <option value="3" selected>x3 — dynamique</option>
 <option value="5">x5 — agressif</option>
 </select>
-
-<div class="diagnostic" id="leverageInfo">
-Mise : 10 € • Exposition simulée : 30 €
+<div class="diagnostic" id="leverageInfo">Mise : 10 € • Exposition simulée : 30 €</div>
 </div>
+
+<div class="trailing-panel">
+<strong>TRAILING STOP AUTOMATIQUE</strong>
+<div class="notice" style="margin-top:7px">
+Activation lorsque le token atteint +10 % depuis l'achat. Ensuite, le stop suit le plus haut cours reçu et reste 5 % en dessous. Si le cours redescend jusqu'au stop, la position est clôturée en simulation.
+</div>
+<div class="diagnostic" id="trailingInfo">Activation : +10 % • Distance : 5 % sous le plus haut cours</div>
 </div>
 
 <div class="stats">
-<div class="stat">
-<small>Solde disponible</small>
-<strong id="cash">100,00 €</strong>
+<div class="stat"><small>Solde disponible</small><strong id="cash">100,00 €</strong></div>
+<div class="stat"><small>Valeur des positions</small><strong id="positions">0,00 €</strong></div>
+<div class="stat"><small>Valeur totale estimée</small><strong id="total">100,00 €</strong></div>
 </div>
-<div class="stat">
-<small>Valeur des positions</small>
-<strong id="positions">0,00 €</strong>
-</div>
-<div class="stat">
-<small>Valeur totale estimée</small>
-<strong id="total">100,00 €</strong>
-</div>
-</div>
-
 <p class="notice">
 Capital fictif initial : 100 €. Mise par achat : 10 €.
 Le levier sélectionné multiplie virtuellement l'exposition et les gains ou pertes.
 Les positions existantes conservent leur levier initial.
 </p>
-
 <div class="diagnostic">
 <strong>Règles de simulation</strong><br>
 Alerte visuelle : +10 % sur le prix du token.<br>
 Prise de bénéfice automatique : +20 %.<br>
-Protection automatique : -10 %.<br>
+Protection automatique initiale : -10 %.<br>
+Trailing stop : activation à +10 %, puis seuil à 5 % sous le plus haut cours reçu.<br>
 La clôture automatique nécessite un nouveau cours valide.
 </div>
-
 <h2 style="margin-top:18px">Diagnostic des cours</h2>
-<div id="priceDiagnostics" class="diagnostic">
-Aucune vérification effectuée.
-</div>
-
+<div id="priceDiagnostics" class="diagnostic">Aucune vérification effectuée.</div>
 <h2 style="margin-top:18px">Positions ouvertes</h2>
 <div id="positionList" class="notice">Aucune position ouverte.</div>
-
 <h2 style="margin-top:18px">Historique</h2>
 <div id="history" class="notice">Aucune opération.</div>
-
 <button class="secondary" onclick="resetWallet()">Réinitialiser la simulation</button>
 </section>
 
@@ -160,9 +126,9 @@ Les cours peuvent être retardés, incomplets ou indisponibles.
 Le scanner fonctionne lorsque la page est ouverte et actualisée.
 Les filtres ne vérifient pas la sécurité des tokens.
 Le levier est uniquement une simulation mathématique : il ne constitue pas un véritable levier de marché et ne reproduit pas les frais, le financement ou les liquidations d'un courtier.
+Le trailing stop ne peut agir qu'après réception d'un nouveau cours ; il ne garantit pas le prix de sortie.
 Aucun achat ou vente réel n'est effectué.
 </section>
-
 </main>
 
 <script>
@@ -170,591 +136,188 @@ const API='https://api.geckoterminal.com/api/v2/networks/solana/new_pools?includ
 const KEY='cart3r_paper_wallet_v1';
 const STAKE=10;
 const ALLOWED_LEVERAGES=[1,2,3,5];
-
+const TRAIL_ACTIVATION=10;
+const TRAIL_DISTANCE=5;
 let LEVERAGE=3;
 let allPools=[];
 
-const euro=n=>Number(n||0).toLocaleString('fr-FR',{
- minimumFractionDigits:2,
- maximumFractionDigits:2
-})+' €';
-
-const usd=n=>'$'+Number(n||0).toLocaleString('en-US',{
- maximumFractionDigits:0
-});
-
-const num=v=>{
- const n=Number(v);
- return Number.isFinite(n)?n:0;
-};
-
-function attrs(pool){
- return pool.attributes||{};
-}
-
+const euro=n=>Number(n||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+const usd=n=>'$'+Number(n||0).toLocaleString('en-US',{maximumFractionDigits:0});
+const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0;};
+function attrs(pool){return pool.attributes||{};}
 function getChange(a){
- const c=[
-  a.price_change_percentage?.h24,
-  a.price_change_percentage?.h1,
-  a.price_change_percentage_24h,
-  a.price_change_24h
- ];
- for(const x of c){
-  if(x!==undefined&&x!==null&&Number.isFinite(Number(x))){
-   return Number(x);
-  }
- }
+ const c=[a.price_change_percentage?.h24,a.price_change_percentage?.h1,a.price_change_percentage_24h,a.price_change_24h];
+ for(const x of c){if(x!==undefined&&x!==null&&Number.isFinite(Number(x)))return Number(x);}
  return null;
 }
-
 function getPools(){
  return allPools.map(p=>{
-  const a=attrs(p);
-  const rel=p.relationships||{};
+  const a=attrs(p),rel=p.relationships||{};
   const token=(rel.base_token?.data?.id||'').split('_').pop();
   const address=String(p.id||'').split('_').pop();
-
-  return {
-   id:p.id,
-   address,
-   name:a.name||token||p.id,
-   symbol:a.base_token_symbol||'',
-   price:num(a.base_token_price_usd),
-   liq:num(a.reserve_in_usd),
-   vol:num(a.volume_usd?.h24),
-   change:getChange(a),
-   url:'https://www.geckoterminal.com/solana/pools/'+address
-  };
+  return {id:p.id,address,name:a.name||token||p.id,symbol:a.base_token_symbol||'',price:num(a.base_token_price_usd),liq:num(a.reserve_in_usd),vol:num(a.volume_usd?.h24),change:getChange(a),url:'https://www.geckoterminal.com/solana/pools/'+address};
  });
 }
-
 function passing(){
- const minL=num(document.getElementById('minLiq').value);
- const minV=num(document.getElementById('minVol').value);
- const maxD=num(document.getElementById('maxDrop').value);
-
- return getPools().filter(p=>
-  p.liq>=minL&&
-  p.vol>=minV&&
-  p.change!==null&&
-  p.change>=-maxD
- );
+ const minL=num(document.getElementById('minLiq').value),minV=num(document.getElementById('minVol').value),maxD=num(document.getElementById('maxDrop').value);
+ return getPools().filter(p=>p.liq>=minL&&p.vol>=minV&&p.change!==null&&p.change>=-maxD);
 }
-
-function applyFilters(){
- renderPools();
-}
-
+function applyFilters(){renderPools();}
 async function fetchJson(url){
- const controller=new AbortController();
- const timer=setTimeout(()=>controller.abort(),12000);
-
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
  try{
-  const response=await fetch(url,{
-   headers:{
-    accept:'application/json',
-    'accept-version':'20230302'
-   },
-   signal:controller.signal
-  });
-
-  if(!response.ok){
-   throw new Error('Réponse HTTP '+response.status);
-  }
-
+  const response=await fetch(url,{headers:{accept:'application/json','accept-version':'20230302'},signal:controller.signal});
+  if(!response.ok)throw new Error('Réponse HTTP '+response.status);
   return await response.json();
- }finally{
-  clearTimeout(timer);
- }
+ }finally{clearTimeout(timer);}
 }
-
 async function loadPools(){
- const s=document.getElementById('status');
- s.textContent='Chargement des nouveaux pools…';
-
+ const s=document.getElementById('status');s.textContent='Chargement des nouveaux pools…';
  try{
-  const j=await fetchJson(API);
-  allPools=Array.isArray(j.data)?j.data:[];
-  renderPools();
-
-  await refreshPositionPrices();
-  checkAutoExits();
-  renderWallet();
-
+  const j=await fetchJson(API);allPools=Array.isArray(j.data)?j.data:[];renderPools();
+  await refreshPositionPrices();checkAutoExits();renderWallet();
   s.textContent='Actualisation terminée. '+allPools.length+' pool(s) reçus.';
- }catch(e){
-  s.textContent='Erreur de chargement : '+
-   (e.name==='AbortError'?'délai dépassé':e.message)+'.';
-
-  setDiagnostic('Impossible de charger les pools : '+e.message);
- }
+ }catch(e){s.textContent='Erreur de chargement : '+(e.name==='AbortError'?'délai dépassé':e.message)+'.';setDiagnostic('Impossible de charger les pools : '+e.message);}
 }
-
 function renderPools(){
- const list=document.getElementById('poolList');
- const good=passing();
-
- document.getElementById('received').textContent=allPools.length;
- document.getElementById('passed').textContent=good.length;
-
- if(!allPools.length){
-  list.textContent='Aucune donnée chargée.';
-  return;
- }
-
- if(!good.length){
-  list.textContent='Aucun pool ne passe actuellement les trois filtres. La variation 24 h peut être absente.';
-  return;
- }
-
+ const list=document.getElementById('poolList'),good=passing();
+ document.getElementById('received').textContent=allPools.length;document.getElementById('passed').textContent=good.length;
+ if(!allPools.length){list.textContent='Aucune donnée chargée.';return;}
+ if(!good.length){list.textContent='Aucun pool ne passe actuellement les trois filtres. La variation 24 h peut être absente.';return;}
  list.innerHTML=good.map(p=>`
- <div class="pool">
-  <div class="pooltop">
-   <span class="token">${escapeHtml(p.name)}</span>
-   <span class="pill">Pool retenu</span>
-  </div>
-
-  <div class="meta">
-   Liquidité ${usd(p.liq)}
-   • Volume 24 h ${usd(p.vol)}
-   • Variation ${p.change.toFixed(2)}%
-   • Prix ${p.price?('$'+p.price):'indisponible'}
-  </div>
-
-  <div class="actions">
-   <button onclick="buyPool('${encodeURIComponent(p.id)}')">
-    Acheter 10 € • x${LEVERAGE}
-   </button>
-   <a href="${p.url}" target="_blank" rel="noopener">Voir le pool</a>
-  </div>
- </div>
- `).join('');
+ <div class="pool"><div class="pooltop"><span class="token">${escapeHtml(p.name)}</span><span class="pill">Pool retenu</span></div>
+ <div class="meta">Liquidité ${usd(p.liq)} • Volume 24 h ${usd(p.vol)} • Variation ${p.change.toFixed(2)}% • Prix ${p.price?('$'+p.price):'indisponible'}</div>
+ <div class="actions"><button onclick="buyPool('${encodeURIComponent(p.id)}')">Acheter 10 € • x${LEVERAGE}</button><a href="${p.url}" target="_blank" rel="noopener">Voir le pool</a></div></div>`).join('');
 }
-
-function escapeHtml(s){
- return String(s).replace(/[&<>"']/g,c=>({
-  '&':'&amp;',
-  '<':'&lt;',
-  '>':'&gt;',
-  '"':'&quot;',
-  "'":'&#39;'
- }[c]));
-}
-
-function defaultWallet(){
- return {
-  cash:100,
-  positions:[],
-  history:[],
-  selectedLeverage:3
- };
-}
-
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function defaultWallet(){return {cash:100,positions:[],history:[],selectedLeverage:3};}
 function readWallet(){
  try{
   const w=JSON.parse(localStorage.getItem(KEY));
-
-  if(!w||typeof w!=='object'){
-   return defaultWallet();
-  }
-
-  return {
-   cash:Number.isFinite(Number(w.cash))?Number(w.cash):100,
-   positions:Array.isArray(w.positions)?w.positions:[],
-   history:Array.isArray(w.history)?w.history:[],
-   selectedLeverage:ALLOWED_LEVERAGES.includes(Number(w.selectedLeverage))
-    ?Number(w.selectedLeverage):3
-  };
- }catch(e){
-  return defaultWallet();
- }
+  if(!w||typeof w!=='object')return defaultWallet();
+  return {cash:Number.isFinite(Number(w.cash))?Number(w.cash):100,positions:Array.isArray(w.positions)?w.positions:[],history:Array.isArray(w.history)?w.history:[],selectedLeverage:ALLOWED_LEVERAGES.includes(Number(w.selectedLeverage))?Number(w.selectedLeverage):3};
+ }catch(e){return defaultWallet();}
 }
-
 let wallet=readWallet();
-
 LEVERAGE=wallet.selectedLeverage;
-
 wallet.positions.forEach(p=>{
  p.freshPrice=false;
-
- if(!Number(p.leverage)){
-  p.leverage=1;
- }
-
- if(!Number(p.exposure)){
-  p.exposure=Number(p.cost)||10;
- }
+ if(!Number(p.leverage))p.leverage=1;
+ if(!Number(p.exposure))p.exposure=Number(p.cost)||10;
+ if(!Number(p.highestPrice)||p.highestPrice<Number(p.price))p.highestPrice=Number(p.price)||0;
+ if(typeof p.trailingActive!=='boolean')p.trailingActive=false;
 });
-
-function persist(){
- localStorage.setItem(KEY,JSON.stringify(wallet));
-}
-
-function save(){
- persist();
- renderWallet();
-}
-
+function persist(){localStorage.setItem(KEY,JSON.stringify(wallet));}
+function save(){persist();renderWallet();}
 function updateLeverageDisplay(){
- const exposure=STAKE*LEVERAGE;
-
  document.getElementById('leverageTitle').textContent='x'+LEVERAGE;
-
- document.getElementById('leverageInfo').textContent=
-  'Mise : '+euro(STAKE)+
-  ' • Exposition simulée : '+euro(exposure);
-
+ document.getElementById('leverageInfo').textContent='Mise : '+euro(STAKE)+' • Exposition simulée : '+euro(STAKE*LEVERAGE);
  document.getElementById('leverageSelect').value=String(LEVERAGE);
 }
-
 function changeLeverage(value){
  const n=Number(value);
-
- if(!ALLOWED_LEVERAGES.includes(n)){
-  document.getElementById('leverageSelect').value=String(LEVERAGE);
-  return;
- }
-
- LEVERAGE=n;
- wallet.selectedLeverage=n;
-
- persist();
- updateLeverageDisplay();
- renderPools();
+ if(!ALLOWED_LEVERAGES.includes(n)){document.getElementById('leverageSelect').value=String(LEVERAGE);return;}
+ LEVERAGE=n;wallet.selectedLeverage=n;persist();updateLeverageDisplay();renderPools();
 }
-
 function buyPool(encodedId){
- const id=decodeURIComponent(encodedId);
- const p=getPools().find(x=>x.id===id);
-
- if(!p){
-  alert('Pool introuvable. Actualise les données puis réessaie.');
-  return;
- }
-
- if(!(p.price>0)){
-  alert('Prix USD indisponible. Aucun achat simulé enregistré.');
-  return;
- }
-
- if(wallet.cash<STAKE){
-  alert('Solde virtuel insuffisant.');
-  return;
- }
-
+ const id=decodeURIComponent(encodedId),p=getPools().find(x=>x.id===id);
+ if(!p){alert('Pool introuvable. Actualise les données puis réessaie.');return;}
+ if(!(p.price>0)){alert('Prix USD indisponible. Aucun achat simulé enregistré.');return;}
+ if(wallet.cash<STAKE){alert('Solde virtuel insuffisant.');return;}
  const exposure=STAKE*LEVERAGE;
-
  wallet.cash-=STAKE;
-
- wallet.positions.push({
-  id:p.id,
-  name:p.name,
-  symbol:p.symbol,
-  price:p.price,
-  lastPrice:p.price,
-  lastPriceAt:null,
-  priceStatus:'prix initial de simulation',
-  leverage:LEVERAGE,
-  exposure:exposure,
-  qty:exposure/p.price,
-  cost:STAKE,
-  url:p.url,
-  freshPrice:false
- });
-
- wallet.history.unshift({
-  type:'Achat fictif x'+LEVERAGE,
-  name:p.name,
-  amount:STAKE,
-  date:new Date().toLocaleString('fr-FR')
- });
-
+ wallet.positions.push({id:p.id,name:p.name,symbol:p.symbol,price:p.price,lastPrice:p.price,lastPriceAt:null,priceStatus:'prix initial de simulation',leverage:LEVERAGE,exposure:exposure,qty:exposure/p.price,cost:STAKE,url:p.url,freshPrice:false,highestPrice:p.price,trailingActive:false,trailingStop:0});
+ wallet.history.unshift({type:'Achat fictif x'+LEVERAGE,name:p.name,amount:STAKE,date:new Date().toLocaleString('fr-FR')});
  save();
-
- alert(
-  'Achat simulé enregistré.\n'+
-  'Mise : 10 €\n'+
-  'Levier : x'+LEVERAGE+'\n'+
-  'Exposition simulée : '+euro(exposure)
- );
+ alert('Achat simulé enregistré.\nMise : 10 €\nLevier : x'+LEVERAGE+'\nExposition simulée : '+euro(exposure));
 }
-
-function latestPrice(pos){
- return Number(pos.lastPrice)>0?Number(pos.lastPrice):0;
-}
-
-function positionPnl(pos,current){
- if(!current||!pos.price)return 0;
-
- const leverage=Number(pos.leverage)||1;
-
- return Number(pos.cost)*leverage*(current/pos.price-1);
-}
-
-function positionEquity(pos,current){
- return Math.max(0,Number(pos.cost)+positionPnl(pos,current));
-}
-
-function setDiagnostic(message){
- const el=document.getElementById('priceDiagnostics');
- if(el)el.textContent=message;
-}
-
+function latestPrice(pos){return Number(pos.lastPrice)>0?Number(pos.lastPrice):0;}
+function positionPnl(pos,current){if(!current||!pos.price)return 0;return Number(pos.cost)*(Number(pos.leverage)||1)*(current/pos.price-1);}
+function positionEquity(pos,current){return Math.max(0,Number(pos.cost)+positionPnl(pos,current));}
+function setDiagnostic(message){const el=document.getElementById('priceDiagnostics');if(el)el.textContent=message;}
 async function refreshPositionPrices(){
- if(!wallet.positions.length){
-  setDiagnostic('Aucune position ouverte à actualiser.');
-  return;
- }
-
- let updated=0;
- let failed=0;
- let details=[];
-
- const now=new Date().toISOString();
-
+ if(!wallet.positions.length){setDiagnostic('Aucune position ouverte à actualiser.');return;}
+ let updated=0,failed=0,details=[];const now=new Date().toISOString();
  for(const pos of wallet.positions){
-  pos.freshPrice=false;
-
-  const address=String(pos.id||'').split('_').pop();
-
-  if(!address){
-   pos.priceStatus='adresse du pool absente';
-   failed++;
-   details.push(pos.name+': adresse absente');
-   continue;
-  }
-
+  pos.freshPrice=false;const address=String(pos.id||'').split('_').pop();
+  if(!address){pos.priceStatus='adresse du pool absente';failed++;details.push(pos.name+': adresse absente');continue;}
   try{
-   const url='https://api.geckoterminal.com/api/v2/networks/solana/pools/'+encodeURIComponent(address);
-   const j=await fetchJson(url);
+   const url='https://api.geckoterminal.com/api/v2/networks/solana/pools/'+encodeURIComponent(address),j=await fetchJson(url);
    const value=num(j?.data?.attributes?.base_token_price_usd);
-
    if(value>0){
-    pos.lastPrice=value;
-    pos.lastPriceAt=now;
-    pos.priceStatus='nouveau cours reçu';
-    pos.freshPrice=true;
-    updated++;
-
-    details.push(pos.name+': nouveau cours reçu');
-   }else{
-    pos.priceStatus='prix absent dans la réponse';
-    failed++;
-    details.push(pos.name+': prix absent');
-   }
-  }catch(e){
-   pos.priceStatus=e.name==='AbortError'
-    ?'délai dépassé'
-    :'échec ('+e.message+')';
-
-   failed++;
-   details.push(pos.name+': '+pos.priceStatus);
-  }
+    pos.lastPrice=value;pos.lastPriceAt=now;pos.priceStatus='nouveau cours reçu';pos.freshPrice=true;
+    if(!Number(pos.highestPrice)||value>Number(pos.highestPrice))pos.highestPrice=value;
+    const gainFromEntry=(value/Number(pos.price)-1)*100;
+    if(gainFromEntry>=TRAIL_ACTIVATION)pos.trailingActive=true;
+    if(pos.trailingActive)pos.trailingStop=Number(pos.highestPrice)*(1-TRAIL_DISTANCE/100);
+    updated++;details.push(pos.name+': nouveau cours reçu');
+   }else{pos.priceStatus='prix absent dans la réponse';failed++;details.push(pos.name+': prix absent');}
+  }catch(e){pos.priceStatus=e.name==='AbortError'?'délai dépassé':'échec ('+e.message+')';failed++;details.push(pos.name+': '+pos.priceStatus);}
  }
-
- persist();
-
- setDiagnostic(
-  updated+' cours reçu(s) • '+
-  failed+' échec(s). '+
-  details.join(' | ')
- );
+ persist();setDiagnostic(updated+' cours reçu(s) • '+failed+' échec(s). '+details.join(' | '));
 }
-
 function closePosition(i,reason){
- const p=wallet.positions[i];
-
- if(!p)return false;
-
- const current=latestPrice(p);
- const pnl=positionPnl(p,current);
- const proceeds=Math.max(0,p.cost+pnl);
-
+ const p=wallet.positions[i];if(!p)return false;
+ const current=latestPrice(p),pnl=positionPnl(p,current),proceeds=Math.max(0,p.cost+pnl);
  wallet.cash+=proceeds;
-
- wallet.history.unshift({
-  type:reason,
-  name:p.name,
-  amount:proceeds,
-  date:new Date().toLocaleString('fr-FR')
- });
-
- wallet.positions.splice(i,1);
-
- return true;
+ wallet.history.unshift({type:reason,name:p.name,amount:proceeds,date:new Date().toLocaleString('fr-FR')});
+ wallet.positions.splice(i,1);return true;
 }
-
 function checkAutoExits(){
  let changed=false;
-
  for(let i=wallet.positions.length-1;i>=0;i--){
-  const p=wallet.positions[i];
-  const current=latestPrice(p);
-
-  if(!p.freshPrice||!current||!p.price){
-   continue;
-  }
-
+  const p=wallet.positions[i],current=latestPrice(p);
+  if(!p.freshPrice||!current||!p.price)continue;
   const pct=(current-p.price)/p.price*100;
   let reason='';
-
-  if(pct>=20){
+  if(p.trailingActive&&Number(p.trailingStop)>0&&current<=Number(p.trailingStop)){
+   reason='Trailing stop automatique fictif';
+  }else if(pct>=20){
    reason='Vente automatique fictive +20 %';
   }else if(pct<=-10){
    reason='Protection automatique fictive -10 %';
   }
-
-  if(reason){
-   closePosition(i,reason);
-   changed=true;
-  }
+  if(reason){closePosition(i,reason);changed=true;}
  }
-
- if(changed){
-  persist();
- }
+ if(changed)persist();
 }
-
 function sell(i){
- const p=wallet.positions[i];
-
- if(!p)return;
-
- if(!p.freshPrice){
-  alert('Aucun nouveau cours reçu pendant cette actualisation. Vente suspendue.');
-  return;
- }
-
- const current=latestPrice(p);
-
- if(!current){
-  alert('Prix actuel indisponible.');
-  return;
- }
-
- closePosition(i,'Vente fictive manuelle');
- save();
+ const p=wallet.positions[i];if(!p)return;
+ if(!p.freshPrice){alert('Aucun nouveau cours reçu pendant cette actualisation. Vente suspendue.');return;}
+ const current=latestPrice(p);if(!current){alert('Prix actuel indisponible.');return;}
+ closePosition(i,'Vente fictive manuelle');save();
 }
-
 function renderWallet(){
  document.getElementById('cash').textContent=euro(wallet.cash);
-
- let val=0;
- let unknown=false;
-
- wallet.positions.forEach(p=>{
-  const price=latestPrice(p);
-
-  if(price>0){
-   val+=positionEquity(p,price);
-  }else{
-   unknown=true;
-  }
- });
-
- document.getElementById('positions').textContent=
-  unknown?'Prix actuel indisponible':euro(val);
-
- document.getElementById('total').textContent=
-  unknown
-   ?'Estimation partielle : '+euro(wallet.cash+val)
-   :euro(wallet.cash+val);
-
+ let val=0,unknown=false;
+ wallet.positions.forEach(p=>{const price=latestPrice(p);if(price>0)val+=positionEquity(p,price);else unknown=true;});
+ document.getElementById('positions').textContent=unknown?'Prix actuel indisponible':euro(val);
+ document.getElementById('total').textContent=unknown?'Estimation partielle : '+euro(wallet.cash+val):euro(wallet.cash+val);
  const pl=document.getElementById('positionList');
-
- pl.innerHTML=wallet.positions.length
- ?wallet.positions.map((p,i)=>{
-  const current=latestPrice(p);
-  const hasPrice=current>0;
-
-  const pnl=hasPrice?positionPnl(p,current):0;
-  const equity=hasPrice?positionEquity(p,current):0;
-  const pct=hasPrice&&p.price>0
-   ?(current/p.price-1)*100:0;
-
-  const leverage=Number(p.leverage)||1;
-  const exposure=Number(p.exposure)||Number(p.cost)*leverage;
-
-  const resultPct=hasPrice&&p.cost>0
-   ?pnl/p.cost*100:0;
-
-  const state=!hasPrice
-   ?'Cours indisponible'
-   :!p.freshPrice
-   ?'Dernier cours connu — non vérifié'
-   :pct>=10
-   ?'Alerte gain +10 %'
-   :pct<=-10
-   ?'Seuil de protection atteint'
-   :'Suivi en cours';
-
-  const updatedAt=p.lastPriceAt
-   ?new Date(p.lastPriceAt).toLocaleString('fr-FR')
-   :'Pas encore actualisé depuis cet achat';
-
-  return `
-  <div class="pool">
-   <strong>${escapeHtml(p.name||'Position')}</strong>
-
-   <div class="meta">
-    <span class="leverage">LEVIER x${leverage}</span>
-    • Mise : ${euro(p.cost)}
-    • Exposition : ${euro(exposure)}
-   </div>
-
-   <div class="meta">
-    Valeur estimée : ${hasPrice?euro(equity):'indisponible'}
-    • Résultat : ${hasPrice?euro(pnl)+' ('+(resultPct>=0?'+':'')+resultPct.toFixed(2)+' % sur la mise)':'indisponible'}
-   </div>
-
-   <div class="meta">
-    Variation du token : ${hasPrice?pct.toFixed(2)+'%':'indisponible'}
-    • ${state}
-   </div>
-
-   <div class="meta">
-    Dernier cours reçu : ${escapeHtml(updatedAt)}
-    • Diagnostic : ${escapeHtml(p.priceStatus||'en attente')}
-   </div>
-
-   <button class="sell" onclick="sell(${i})" ${p.freshPrice?'':'disabled'}>
-    Vendre en simulation
-   </button>
-  </div>
-  `;
- }).join('')
- :'Aucune position ouverte.';
-
+ pl.innerHTML=wallet.positions.length?wallet.positions.map((p,i)=>{
+  const current=latestPrice(p),hasPrice=current>0,pnl=hasPrice?positionPnl(p,current):0,equity=hasPrice?positionEquity(p,current):0;
+  const pct=hasPrice&&p.price>0?(current/p.price-1)*100:0,leverage=Number(p.leverage)||1,exposure=Number(p.exposure)||Number(p.cost)*leverage;
+  const resultPct=hasPrice&&p.cost>0?pnl/p.cost*100:0;
+  const high=Number(p.highestPrice)||Number(p.price)||0,stop=Number(p.trailingStop)||0;
+  const trailingText=p.trailingActive?'ACTIF • Stop suiveur : '+(stop>0?'$'+stop.toPrecision(7):'en attente')+' • Plus haut : $'+high.toPrecision(7):'En attente d’une hausse de +'+TRAIL_ACTIVATION+' %';
+  const state=!hasPrice?'Cours indisponible':!p.freshPrice?'Dernier cours connu — non vérifié':p.trailingActive?'Trailing stop actif':pct>=10?'Alerte gain +10 %':pct<=-10?'Seuil de protection atteint':'Suivi en cours';
+  const updatedAt=p.lastPriceAt?new Date(p.lastPriceAt).toLocaleString('fr-FR'):'Pas encore actualisé depuis cet achat';
+  return `<div class="pool"><strong>${escapeHtml(p.name||'Position')}</strong>
+  <div class="meta"><span class="leverage">LEVIER x${leverage}</span> • Mise : ${euro(p.cost)} • Exposition : ${euro(exposure)}</div>
+  <div class="meta">Valeur estimée : ${hasPrice?euro(equity):'indisponible'} • Résultat : ${hasPrice?euro(pnl)+' ('+(resultPct>=0?'+':'')+resultPct.toFixed(2)+' % sur la mise)':'indisponible'}</div>
+  <div class="meta">Variation du token : ${hasPrice?pct.toFixed(2)+'%':'indisponible'} • ${state}</div>
+  <div class="meta">Trailing stop : ${escapeHtml(trailingText)}</div>
+  <div class="meta">Dernier cours reçu : ${escapeHtml(updatedAt)} • Diagnostic : ${escapeHtml(p.priceStatus||'en attente')}</div>
+  <button class="sell" onclick="sell(${i})" ${p.freshPrice?'':'disabled'}>Vendre en simulation</button></div>`;
+ }).join(''):'Aucune position ouverte.';
  const h=document.getElementById('history');
-
- h.innerHTML=wallet.history.length
- ?wallet.history.slice(0,30).map(x=>`
-  <div class="pool">
-   <strong>${escapeHtml(x.type)} — ${escapeHtml(x.name)}</strong>
-   <div class="meta">${euro(x.amount)} • ${escapeHtml(x.date)}</div>
-  </div>
- `).join('')
- :'Aucune opération.';
+ h.innerHTML=wallet.history.length?wallet.history.slice(0,30).map(x=>`<div class="pool"><strong>${escapeHtml(x.type)} — ${escapeHtml(x.name)}</strong><div class="meta">${euro(x.amount)} • ${escapeHtml(x.date)}</div></div>`).join(''):'Aucune opération.';
 }
-
 function resetWallet(){
- if(!confirm('Effacer le portefeuille virtuel et son historique ?')){
-  return;
- }
-
- wallet=defaultWallet();
- LEVERAGE=3;
-
- persist();
- updateLeverageDisplay();
- renderWallet();
- renderPools();
-
- setDiagnostic('Portefeuille virtuel réinitialisé.');
+ if(!confirm('Effacer le portefeuille virtuel et son historique ?'))return;
+ wallet=defaultWallet();LEVERAGE=3;persist();updateLeverageDisplay();renderWallet();renderPools();setDiagnostic('Portefeuille virtuel réinitialisé.');
 }
-
-updateLeverageDisplay();
-renderWallet();
+updateLeverageDisplay();renderWallet();
 </script>
 </body>
 </html>
