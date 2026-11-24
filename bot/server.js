@@ -361,6 +361,7 @@ function getOrCreateCandidate(mint, dexName) {
       liquidity: null,
       liquidityVerified: false,
       liquiditySol: null,
+      quoteReserveSol: null,
       quoteLiquidity: null,
       buyVolumeSolEquivalent: 0,
       sellVolumeSolEquivalent: 0,
@@ -439,6 +440,7 @@ function addSwap(mint, swap, dexName, signature, slot, market) {
     p.liquidityVerified = false;
     p.liquidity = null;
     p.liquiditySol = null;
+    p.quoteReserveSol = null;
     p.quoteLiquidity = null;
   }
   p.lastSwapAt = ts;
@@ -542,8 +544,10 @@ async function verifyPoolLiquidity(p) {
   }
   if (!Number.isFinite(quoteSol) || quoteSol <= 0) throw new Error("Réserve de cotation non convertible en SOL");
   p.quoteLiquidity = quoteAmount;
-  p.liquiditySol = round(quoteSol, 4);
-  p.liquidity = p.quoteMint === SOL_MINT ? round(quoteAmount, 4) : round(quoteAmount, 2);
+  p.quoteReserveSol = round(quoteSol, 4);
+  // CPMM reserves are approximately value-balanced at spot: report an estimate, not an exact TVL.
+  p.liquiditySol = round(quoteSol * 2, 4);
+  p.liquidity = p.liquiditySol;
   p.liquidityVerified = quoteSol >= CONFIG.minLiquiditySol;
   p.liquidityCheckedAt = new Date().toISOString();
   p.baseReserve = round(baseAmount, 4);
@@ -602,6 +606,7 @@ async function checkCandidate(p) {
     p.liquidityVerified = false;
     p.liquidity = null;
     p.liquiditySol = null;
+    p.quoteReserveSol = null;
     risks.push("Liquidité du pool non vérifiée : " + safeError(e));
   }
 
@@ -860,9 +865,10 @@ function publicCandidate(p) {
     liquidity: p.liquidity,
     liquidityVerified: Boolean(p.liquidityVerified),
     liquiditySol: p.liquiditySol,
+    estimatedLiquiditySol: p.liquiditySol,
+    quoteReserveSol: p.quoteReserveSol,
     quoteLiquidity: p.quoteLiquidity,
     quoteMint: p.quoteMint,
-    poolAddress: p.poolAddress,
     volume: p.volume,
     volumeUsd: p.volumeUsd,
     volumeSol: round(p.volumeSol, 6),
