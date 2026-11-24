@@ -21,37 +21,43 @@ const GECKO_BASE = "https://api.geckoterminal.com/api/v2";
 
 const CONFIG = {
   MAX_POOLS: 100,
+  MAX_CATALOG_POOLS: 300,
+  CATALOG_TTL_MS: 3600000,
 
   // GECKOTERMINAL
-  GECKO_REQUEST_GAP_MS: 8000,
+  GECKO_REQUEST_GAP_MS: 65000,
   GECKO_CACHE_MS: 240000,
-  GECKO_COOLDOWN_MS: 60000,
-  GECKO_STALE_MAX_MS: 1800000,
+  GECKO_STALE_MAX_MS: 3600000,
+  GECKO_COOLDOWN_MS: 120000,
+  GECKO_MAX_COOLDOWN_MS: 1800000,
 
   // JUPITER
   MAX_JUPITER_CHECKS: 3,
-  JUPITER_REQUEST_GAP_MS: 1500,
-  JUPITER_COOLDOWN_MS: 60000,
+  JUPITER_REQUEST_GAP_MS: 2000,
+  JUPITER_COOLDOWN_MS: 120000,
   SOL_PRICE_CACHE_MS: 300000,
 
+  // SCANNER
   SCAN_INTERVAL: 300000,
   REQUEST_TIMEOUT: 20000,
 
+  // FILTRES
   MIN_LIQUIDITY_USD: 5000,
   MIN_VOLUME_1H_USD: 1000,
   MIN_AGE_MINUTES: 5,
   MIN_TRANSACTIONS_1H: 5,
-  MIN_SCORE: 50,
+  MIN_SCORE: 45,
   MIN_BUY_RATIO: 50,
+  MAX_VOLUME_LIQUIDITY_RATIO: 10,
 
+  // SIMULATION
   TEST_TRADE_USD: 10,
-  MAX_JUPITER_IMPACT_PCT: 5,
-
-  MAX_VOLUME_LIQUIDITY_RATIO: 10
+  MAX_JUPITER_IMPACT_PCT: 5
 };
 
 // --------------------------------------------------
 // FLUX GECKOTERMINAL
+// Un seul flux interrogé par scan.
 // --------------------------------------------------
 
 const GECKO_FEEDS = [
@@ -102,14 +108,17 @@ let geckoLastCheck = null;
 let geckoLastError = null;
 let geckoCallsCount = 0;
 let geckoSuccessCount = 0;
+let geckoFailureCount = 0;
+let geckoBackoffLevel = 0;
+let geckoFeedIndex = 0;
+let geckoCurrentFeed = null;
+let geckoInFlight = null;
 
 let jupiterLastCheck = null;
 let jupiterLastError = null;
 let jupiterLastSolPriceUsd = null;
-
 let jupiterChecksCount = 0;
 let jupiterSuccessCount = 0;
-
 let jupiterRequestAt = 0;
 let jupiterQueue = Promise.resolve();
 
@@ -128,6 +137,7 @@ let heliusLastCheck = null;
 let heliusError = null;
 
 const geckoCache = new Map();
+const poolCatalog = new Map();
 const snapshots = new Map();
 
 // --------------------------------------------------
@@ -214,15 +224,10 @@ async function httpJson(url, options = {}, timeoutMs = CONFIG.REQUEST_TIMEOUT) {
     });
 
     if (!response.ok) {
-      const error = new Error(
-        "HTTP " + response.status
-      );
+      const error = new Error("HTTP " + response.status);
 
       error.status = response.status;
-      error.retryAfterMs = retryAfterMs(
-        response,
-        60000
-      );
+      error.retryAfterMs = retryAfterMs(response, 60000);
 
       throw error;
     }
@@ -238,10 +243,27 @@ async function httpJson(url, options = {}, timeoutMs = CONFIG.REQUEST_TIMEOUT) {
 // GECKOTERMINAL
 // --------------------------------------------------
 
+function geckoBackoffMs() {
+  const delays = [
+    120000,
+    300000,
+    600000,
+    1200000,
+    CONFIG.GECKO_MAX_COOLDOWN_MS
+  ];
+
+  return delays[
+    Math.min(geckoBackoffLevel, delays.length - 1)
+  ];
+}
+
 async function geckoRequest(feed) {
+  if (geckoInFlight) {
+    return geckoInFlight;
+  }
+
   const cached = geckoCache.get(feed.name);
 
-  // Cache frais : aucun nouvel appel.
   if (
     cached &&
     Date.now() - cached.time < CONFIG.GECKO_CACHE_MS
@@ -249,70 +271,7 @@ async function geckoRequest(feed) {
     return cached.data;
   }
 
-  // Si l'API est en pause, on utilise les anciennes données.
   if (isGeckoCooldown()) {
-    if (cached) return cached.data;
-
-    throw new Error("GeckoTerminal en pause");
-  }
-
-  const wait = Math.max(
-    0,
-    CONFIG.GECKO_REQUEST_GAP_MS -
-      (Date.now() - geckoLastRequestAt)
-  );
-
-  if (wait > 0) await sleep(wait);
-
-  // Une autre requête a pu déclencher un cooldown pendant l'attente.
-  if (isGeckoCooldown()) {
-    if (cached) return cached.data;
-
-    throw new Error("GeckoTerminal en pause");
-  }
-
-  geckoLastRequestAt = Date.now();
-  geckoCallsCount++;
-
-  try {
-    const data = await httpJson(
-      feed.url,
-      {
-        headers: {
-          Accept: "application/json;version=20230302"
-        }
-      }
-    );
-
-    if (!data || !Array.isArray(data.data)) {
-      throw new Error("Format GeckoTerminal invalide");
-    }
-
-    if (data.data.length > 0) {
-      geckoCache.set(feed.name, {
-        data,
-        time: Date.now()
-      });
-    }
-
-    geckoLastCheck = new Date().toISOString();
-    geckoLastError = null;
-    geckoSuccessCount++;
-
-    return data;
-
-  } catch (error) {
-    if (error.status === 429) {
-      setGeckoCooldown(
-        error.retryAfterMs || CONFIG.GECKO_COOLDOWN_MS
-      );
-
-      geckoLastError = "GeckoTerminal HTTP 429";
-    } else {
-      geckoLastError = error.message;
-    }
-
-    // Cache périmé accepté temporairement.
     if (
       cached &&
       Date.now() - cached.time < CONFIG.GECKO_STALE_MAX_MS
@@ -320,12 +279,89 @@ async function geckoRequest(feed) {
       return cached.data;
     }
 
-    throw error;
+    throw new Error("GeckoTerminal en pause");
+  }
+
+  geckoInFlight = (async () => {
+    const wait = Math.max(
+      0,
+      CONFIG.GECKO_REQUEST_GAP_MS -
+        (Date.now() - geckoLastRequestAt)
+    );
+
+    if (wait > 0) await sleep(wait);
+
+    if (isGeckoCooldown()) {
+      throw new Error("GeckoTerminal en pause");
+    }
+
+    geckoLastRequestAt = Date.now();
+    geckoLastCheck = new Date().toISOString();
+    geckoCurrentFeed = feed.name;
+    geckoCallsCount++;
+
+    try {
+      const data = await httpJson(
+        feed.url,
+        {
+          headers: {
+            Accept: "application/json;version=20230302"
+          }
+        }
+      );
+
+      if (!data || !Array.isArray(data.data)) {
+        throw new Error("Format GeckoTerminal invalide");
+      }
+
+      if (data.data.length > 0) {
+        geckoCache.set(feed.name, {
+          data,
+          time: Date.now()
+        });
+      }
+
+      geckoBackoffLevel = 0;
+      geckoLastError = null;
+      geckoSuccessCount++;
+
+      return data;
+
+    } catch (error) {
+      geckoFailureCount++;
+
+      if (error.status === 429) {
+        const pause = error.retryAfterMs ||
+          geckoBackoffMs();
+
+        setGeckoCooldown(pause);
+        geckoBackoffLevel++;
+
+        geckoLastError = "GeckoTerminal HTTP 429";
+      } else {
+        geckoLastError = error.message;
+      }
+
+      if (
+        cached &&
+        Date.now() - cached.time < CONFIG.GECKO_STALE_MAX_MS
+      ) {
+        return cached.data;
+      }
+
+      throw error;
+    }
+  })();
+
+  try {
+    return await geckoInFlight;
+  } finally {
+    geckoInFlight = null;
   }
 }
 
 // --------------------------------------------------
-// NORMALISATION DES DONNÉES GECKO
+// NORMALISATION GECKOTERMINAL
 // --------------------------------------------------
 
 function relationshipAddress(relationship) {
@@ -367,6 +403,12 @@ function normalizeGeckoResponse(response) {
 
   const normalized = [];
 
+  const quoteMints = new Set([
+    SOL_MINT,
+    USDC_MINT,
+    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+  ]);
+
   for (const item of response.data || []) {
     if (!item.attributes) continue;
 
@@ -392,14 +434,6 @@ function normalizeGeckoResponse(response) {
       name: "Token Solana",
       symbol: "UNKNOWN"
     };
-
-    // On évite de considérer SOL ou les stablecoins
-    // comme le memecoin à analyser.
-    const quoteMints = new Set([
-      SOL_MINT,
-      USDC_MINT,
-      "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
-    ]);
 
     let token = baseInfo;
     let otherToken = quoteInfo;
@@ -487,62 +521,115 @@ function normalizeGeckoResponse(response) {
 }
 
 // --------------------------------------------------
-// DÉCOUVERTE DES POOLS
+// CATALOGUE CUMULATIF DES POOLS
 // --------------------------------------------------
 
-async function discoverPools() {
-  const allPairs = [];
-  const errors = [];
+function updatePoolCatalog(pairs) {
+  const now = Date.now();
 
-  for (const feed of GECKO_FEEDS) {
-    try {
-      const response = await geckoRequest(feed);
-      const normalized = normalizeGeckoResponse(response);
+  for (const pair of pairs) {
+    const key = pair.pairAddress;
 
-      allPairs.push(...normalized);
+    if (!key) continue;
 
-    } catch (error) {
-      errors.push(feed.name + ": " + error.message);
+    const previous = poolCatalog.get(key);
 
-      // En cas de 429, on ne sollicite pas
-      // davantage l'API pendant le cooldown.
-      if (error.status === 429 || isGeckoCooldown()) {
-        break;
-      }
-    }
-  }
+    const currentLiquidity = num(
+      pair.liquidity && pair.liquidity.usd
+    );
 
-  // Les résultats déjà reçus restent utilisables.
-  if (allPairs.length > 0) {
-    geckoLastError = errors.length
-      ? errors.join(" | ")
-      : null;
+    const previousLiquidity = previous
+      ? num(previous.pair.liquidity && previous.pair.liquidity.usd)
+      : 0;
 
-    return allPairs;
-  }
-
-  // Si tous les flux ont échoué, on tente
-  // de conserver les données en cache.
-  for (const cached of geckoCache.values()) {
+    // On conserve la meilleure paire connue pour ce pool.
     if (
-      Date.now() - cached.time <= CONFIG.GECKO_STALE_MAX_MS
+      !previous ||
+      currentLiquidity >= previousLiquidity
     ) {
-      allPairs.push(
-        ...normalizeGeckoResponse(cached.data)
-      );
+      poolCatalog.set(key, {
+        pair,
+        updatedAt: now
+      });
+    } else {
+      previous.updatedAt = now;
     }
   }
 
-  if (allPairs.length > 0) {
-    geckoLastError =
-      "Utilisation du cache après indisponibilité API";
-
-    return allPairs;
+  for (const [key, value] of poolCatalog.entries()) {
+    if (now - value.updatedAt > CONFIG.CATALOG_TTL_MS) {
+      poolCatalog.delete(key);
+    }
   }
 
-  throw new Error(
-    errors.join(" | ") || "Aucun pool GeckoTerminal disponible"
-  );
+  // Protection contre une croissance illimitée.
+  if (poolCatalog.size > CONFIG.MAX_CATALOG_POOLS) {
+    const sorted = Array.from(poolCatalog.entries())
+      .sort((a, b) => b[1].updatedAt - a[1].updatedAt);
+
+    poolCatalog.clear();
+
+    for (const [key, value] of sorted.slice(
+      0,
+      CONFIG.MAX_CATALOG_POOLS
+    )) {
+      poolCatalog.set(key, value);
+    }
+  }
+}
+
+function getCatalogPairs() {
+  const grouped = new Map();
+
+  for (const value of poolCatalog.values()) {
+    const pair = value.pair;
+
+    if (!pair || !pair.address) continue;
+
+    const previous = grouped.get(pair.address);
+
+    if (
+      !previous ||
+      num(pair.liquidity && pair.liquidity.usd) >
+        num(previous.liquidity && previous.liquidity.usd)
+    ) {
+      grouped.set(pair.address, pair);
+    }
+  }
+
+  return Array.from(grouped.values());
+}
+
+async function discoverPools() {
+  const feed = GECKO_FEEDS[
+    geckoFeedIndex % GECKO_FEEDS.length
+  ];
+
+  geckoFeedIndex =
+    (geckoFeedIndex + 1) % GECKO_FEEDS.length;
+
+  try {
+    const response = await geckoRequest(feed);
+    const normalized = normalizeGeckoResponse(response);
+
+    updatePoolCatalog(normalized);
+
+    geckoLastError = null;
+
+  } catch (error) {
+    geckoLastError =
+      feed.name + ": " + error.message;
+  }
+
+  const catalogPairs = getCatalogPairs();
+
+  if (!catalogPairs.length) {
+    throw new Error(
+      geckoLastError || "Aucun pool disponible"
+    );
+  }
+
+  return catalogPairs;
 }
 
 // --------------------------------------------------
@@ -595,6 +682,79 @@ async function checkHelius() {
     heliusError = error.message;
     return false;
   }
+}
+
+// --------------------------------------------------
+// EXTENSIONS TOKEN-2022
+// --------------------------------------------------
+
+const DANGEROUS_TOKEN2022_EXTENSIONS = new Set([
+  1,  // TransferFeeConfig
+  3,  // MintCloseAuthority
+  4,  // ConfidentialTransferMint
+  6,  // DefaultAccountState
+  9,  // NonTransferable
+  12, // PermanentDelegate
+  14, // TransferHook
+  16, // ConfidentialTransferFeeConfig
+  25  // PausableConfig, si présent dans la version du programme
+]);
+
+function inspectToken2022Extensions(data) {
+  if (data.length <= 82) {
+    return {
+      checked: true,
+      extensions: [],
+      dangerous: []
+    };
+  }
+
+  // Les comptes mint Token-2022 avec extensions
+  // utilisent une zone de padding puis un type de compte.
+  if (data.length < 166 || data.readUInt8(165) !== 1) {
+    return {
+      checked: false,
+      extensions: [],
+      dangerous: [],
+      error: "Format d'extensions non reconnu"
+    };
+  }
+
+  let offset = 166;
+  const extensions = [];
+  const dangerous = [];
+
+  while (offset + 4 <= data.length) {
+    const type = data.readUInt16LE(offset);
+    const length = data.readUInt16LE(offset + 2);
+
+    offset += 4;
+
+    if (type === 0 && length === 0) break;
+
+    if (offset + length > data.length) {
+      return {
+        checked: false,
+        extensions,
+        dangerous,
+        error: "TLV Token-2022 invalide"
+      };
+    }
+
+    extensions.push(type);
+
+    if (DANGEROUS_TOKEN2022_EXTENSIONS.has(type)) {
+      dangerous.push(type);
+    }
+
+    offset += length;
+  }
+
+  return {
+    checked: true,
+    extensions,
+    dangerous
+  };
 }
 
 // --------------------------------------------------
@@ -673,15 +833,26 @@ async function checkMintAuthorities(addresses) {
           const initialized =
             data.readUInt8(45) === 1;
 
+          const token2022 =
+            owner === TOKEN_2022_PROGRAM;
+
+          const extensionInfo = token2022
+            ? inspectToken2022Extensions(data)
+            : {
+                checked: true,
+                extensions: [],
+                dangerous: []
+              };
+
           results.set(address, {
             checked: true,
             owner,
+            token2022,
 
-            token2022: owner === TOKEN_2022_PROGRAM,
-
-            // Les extensions Token-2022 ne sont
-            // pas intégralement analysées ici.
-            extensionsChecked: false,
+            extensionsChecked: extensionInfo.checked,
+            extensions: extensionInfo.extensions,
+            dangerousExtensions: extensionInfo.dangerous,
+            extensionError: extensionInfo.error || null,
 
             initialized,
 
@@ -878,7 +1049,6 @@ async function getJupiterSolPrice() {
   solPriceFetchedAt = Date.now();
 
   jupiterLastSolPriceUsd = round(price, 4);
-  jupiterLastError = null;
 
   return price;
 }
@@ -905,7 +1075,7 @@ function getPriceImpactPercent(quote) {
 }
 
 // --------------------------------------------------
-// TEST ACHAT ET REVENTE
+// VÉRIFICATION ACHAT + REVENTE
 // --------------------------------------------------
 
 async function checkJupiterSellability(pool, solPrice) {
@@ -947,31 +1117,27 @@ async function checkJupiterSellability(pool, solPrice) {
       throw new Error("Montant de revente invalide");
     }
 
-    const returnPercent =
-      ((sellSol - initialSol) / initialSol) * 100;
-
     const buyImpact = getPriceImpactPercent(buy);
     const sellImpact = getPriceImpactPercent(sell);
 
-    const impacts = [
-      buyImpact,
-      sellImpact
-    ].filter(value => value !== null);
-
-    const maxImpact = impacts.length
-      ? Math.max(...impacts)
-      : null;
-
-    if (
-      maxImpact === null ||
-      maxImpact > CONFIG.MAX_JUPITER_IMPACT_PCT
-    ) {
-      throw new Error(
-        "Impact excessif ou indisponible : " +
-        maxImpact
-      );
+    if (buyImpact === null || sellImpact === null) {
+      throw new Error("Impact Jupiter indisponible");
     }
 
+    const maxImpact = Math.max(
+      buyImpact,
+      sellImpact
+    );
+
+    if (maxImpact > CONFIG.MAX_JUPITER_IMPACT_PCT) {
+      throw new Error("Impact excessif");
+    }
+
+    const returnPercent =
+      ((sellSol - initialSol) / initialSol) * 100;
+
+    // Estimation indicative uniquement.
+    // Les frais réels dépendent de la transaction.
     const estimatedNetworkFeesSol = 0.00001;
 
     const netSellSol = Math.max(
@@ -1079,7 +1245,7 @@ function chooseBestPair(address, pairs) {
 }
 
 // --------------------------------------------------
-// ANALYSE DES POOLS
+// ANALYSE ET SCORE
 // --------------------------------------------------
 
 function analyzePool(address, pair, mint) {
@@ -1147,9 +1313,28 @@ function analyzePool(address, pair, mint) {
   if (!mint || !mint.checked) {
     risks.push("AUTORITÉS NON VÉRIFIÉES");
   } else {
-    if (!mint.initialized) risks.push("MINT NON INITIALISÉ");
-    if (mint.mintAuthorityActive) risks.push("AUTORITÉ MINT ACTIVE");
-    if (mint.freezeAuthorityActive) risks.push("AUTORITÉ FREEZE ACTIVE");
+    if (!mint.initialized) {
+      risks.push("MINT NON INITIALISÉ");
+    }
+
+    if (mint.mintAuthorityActive) {
+      risks.push("AUTORITÉ MINT ACTIVE");
+    }
+
+    if (mint.freezeAuthorityActive) {
+      risks.push("AUTORITÉ FREEZE ACTIVE");
+    }
+
+    if (mint.token2022 && !mint.extensionsChecked) {
+      risks.push("EXTENSIONS NON VÉRIFIÉES");
+    }
+
+    if (
+      mint.dangerousExtensions &&
+      mint.dangerousExtensions.length
+    ) {
+      risks.push("EXTENSION TOKEN-2022 À RISQUE");
+    }
   }
 
   if (totalTransactions < CONFIG.MIN_TRANSACTIONS_1H) {
@@ -1157,7 +1342,7 @@ function analyzePool(address, pair, mint) {
   }
 
   if (
-    totalTransactions >= 10 &&
+    totalTransactions >= 5 &&
     buyRatio * 100 < CONFIG.MIN_BUY_RATIO
   ) {
     risks.push("PRESSION ACHETEUSE FAIBLE");
@@ -1170,9 +1355,12 @@ function analyzePool(address, pair, mint) {
     risks.push("PRESSION VENDEUSE");
   }
 
+  const volumeLiquidityRatio =
+    liquidity > 0 ? volume1h / liquidity : 0;
+
   if (
-    liquidity > 0 &&
-    volume1h > liquidity * CONFIG.MAX_VOLUME_LIQUIDITY_RATIO
+    volumeLiquidityRatio >
+    CONFIG.MAX_VOLUME_LIQUIDITY_RATIO
   ) {
     risks.push("VOLUME ANORMAL");
   }
@@ -1180,22 +1368,23 @@ function analyzePool(address, pair, mint) {
   const momentum = num(changes.m5);
   const momentum1h = num(changes.h1);
 
+  // Score rééquilibré sur 100.
   let score = 0;
 
-  score += Math.min(20, liquidity / 2500);
-  score += Math.min(20, volume1h / 2000);
-  score += Math.min(15, totalTransactions / 4);
-  score += buyRatio * 20;
+  score += Math.min(20, liquidity / 1000);
+  score += Math.min(20, volume1h / 500);
+  score += Math.min(15, totalTransactions / 2);
+  score += Math.min(20, buyRatio * 20);
   score += Math.max(0, Math.min(10, momentum));
 
   score += Math.min(
-    10,
-    Math.max(0, acceleration - 1) * 5
+    5,
+    Math.max(0, acceleration - 1) * 2
   );
 
   if (
     ageMinutes !== null &&
-    ageMinutes >= 10 &&
+    ageMinutes >= 5 &&
     ageMinutes <= 1440
   ) {
     score += 5;
@@ -1218,7 +1407,10 @@ function analyzePool(address, pair, mint) {
     mint.checked &&
     mint.initialized &&
     !mint.mintAuthorityActive &&
-    !mint.freezeAuthorityActive
+    !mint.freezeAuthorityActive &&
+    mint.extensionsChecked &&
+    (!mint.dangerousExtensions ||
+      mint.dangerousExtensions.length === 0)
   );
 
   const buyEligible =
@@ -1263,6 +1455,7 @@ function analyzePool(address, pair, mint) {
       : round(ageMinutes),
 
     acceleration: round(acceleration, 3),
+    volumeLiquidityRatio: round(volumeLiquidityRatio, 3),
 
     score,
 
@@ -1315,14 +1508,19 @@ async function scan() {
   try {
     const pairs = await discoverPools();
 
-    // Un même token peut apparaître dans plusieurs flux.
-    const uniqueAddresses = Array.from(
-      new Set(pairs.map(pair => pair.address))
-    ).slice(0, CONFIG.MAX_POOLS);
-
-    if (!uniqueAddresses.length) {
-      throw new Error("Aucun token exploitable trouvé");
+    if (!pairs.length) {
+      throw new Error("Aucun pool exploitable trouvé");
     }
+
+    // Priorité aux pools les plus liquides.
+    const sortedPairs = [...pairs].sort((a, b) => {
+      return num(b.liquidity && b.liquidity.usd) -
+        num(a.liquidity && a.liquidity.usd);
+    });
+
+    const uniqueAddresses = Array.from(
+      new Set(sortedPairs.map(pair => pair.address))
+    ).slice(0, CONFIG.MAX_POOLS);
 
     const mintResults =
       await checkMintAuthorities(uniqueAddresses);
@@ -1353,16 +1551,17 @@ async function scan() {
       .slice(0, CONFIG.MAX_JUPITER_CHECKS);
 
     if (!JUPITER_API_KEY) {
+      jupiterLastError = "Clé API non configurée";
+
       for (const pool of candidates) {
         pool.buyEligible = false;
         pool.sellability = "JUPITER NON CONFIGURÉ";
+
         pool.jupiter = {
           verified: false,
           error: "JUPITER_API_KEY non configurée"
         };
       }
-
-      jupiterLastError = "Clé API non configurée";
 
     } else if (candidates.length > 0) {
       try {
@@ -1389,7 +1588,6 @@ async function scan() {
             pool.jupiter &&
             pool.jupiter.error === "Jupiter HTTP 429"
           ) {
-            // Arrêt immédiat des appels Jupiter.
             break;
           }
         }
@@ -1409,9 +1607,12 @@ async function scan() {
           }
         }
       }
+
+    } else {
+      jupiterLastError =
+        "Aucun candidat ne passe les filtres préalables";
     }
 
-    // Classement final.
     results.sort((a, b) => {
       if (a.buyEligible !== b.buyEligible) {
         return a.buyEligible ? -1 : 1;
@@ -1429,7 +1630,6 @@ async function scan() {
       ? "DEGRADED"
       : "OK";
 
-    // Nettoyage des snapshots.
     for (const [key, value] of snapshots.entries()) {
       if (Date.now() - value.time > 3600000) {
         snapshots.delete(key);
@@ -1439,13 +1639,10 @@ async function scan() {
   } catch (error) {
     lastError = error.message;
 
-    if (isGeckoCooldown()) {
-      scannerState = "DEGRADED";
-    } else {
-      scannerState = "ERROR";
-    }
+    scannerState = "DEGRADED";
 
-    // Ne jamais effacer les anciens pools valides.
+    // Les anciens pools ne sont jamais effacés
+    // simplement parce qu'une API est indisponible.
   } finally {
     scanning = false;
 
@@ -1489,7 +1686,7 @@ function scheduleNextScan(delay) {
 // --------------------------------------------------
 
 function startScanner() {
-  if (scanning) return;
+  if (running && scanning) return;
 
   if (scanTimer) clearTimeout(scanTimer);
   if (heliusTimer) clearInterval(heliusTimer);
@@ -1506,11 +1703,9 @@ function startScanner() {
   }, 300000);
 
   countdownTimer = setInterval(() => {
-    const now = Date.now();
-
     nextScanInSeconds = Math.max(
       0,
-      Math.ceil((nextScanAt - now) / 1000)
+      Math.ceil((nextScanAt - Date.now()) / 1000)
     );
   }, 1000);
 }
@@ -1538,7 +1733,7 @@ app.get("/", (req, res) => {
   res.json({
     name: "CART3R.JAILBREAK",
     status: "online",
-    version: "GECKO-V4",
+    version: "GECKO-V5",
     mode: "TEST",
     realTrading: false
   });
@@ -1560,12 +1755,12 @@ app.get("/health", (req, res) => {
 app.get("/status", (req, res) => {
   res.json({
     running,
-
     mode: "TEST",
     realTrading: false,
 
     scanner: scannerState,
     poolsFound: pools.length,
+    catalogPools: poolCatalog.size,
 
     lastUpdate,
     lastError,
@@ -1578,12 +1773,17 @@ app.get("/status", (req, res) => {
       configured: true,
 
       feeds: GECKO_FEEDS.length,
+      currentFeed: geckoCurrentFeed,
+      nextFeed: GECKO_FEEDS[geckoFeedIndex].name,
 
       callsCount: geckoCallsCount,
       successCount: geckoSuccessCount,
+      failureCount: geckoFailureCount,
 
       lastCheck: geckoLastCheck,
       lastError: geckoLastError,
+
+      backoffLevel: geckoBackoffLevel,
 
       cooldownSeconds: Math.max(
         0,
@@ -1592,14 +1792,7 @@ app.get("/status", (req, res) => {
         )
       ),
 
-      cachedFeeds: Array.from(geckoCache.keys()),
-
-      cacheAgeSeconds: Object.fromEntries(
-        Array.from(geckoCache.entries()).map(([key, value]) => [
-          key,
-          Math.floor((Date.now() - value.time) / 1000)
-        ])
-      )
+      cachedFeeds: Array.from(geckoCache.keys())
     },
 
     helius: {
@@ -1634,7 +1827,7 @@ app.get("/status", (req, res) => {
       freezeAuthorityCheck: true,
       tokenProgramCheck: true,
 
-      token2022ExtensionsFullyChecked: false,
+      token2022ExtensionInspection: true,
 
       liquidityCheck: true,
       volumeCheck: true,
@@ -1643,9 +1836,10 @@ app.get("/status", (req, res) => {
       buyPressureCheck: true,
       scoreCheck: true,
 
-      sellabilityQuoteCheck: true,
-      sellabilitySimulation: false,
+      buyQuoteCheck: true,
+      sellQuoteCheck: true,
 
+      sellabilitySimulation: false,
       realTrading: false
     }
   });
@@ -1659,6 +1853,7 @@ app.get("/pools", (req, res) => {
   res.json({
     ok: true,
     count: pools.length,
+    catalogPools: poolCatalog.size,
     maxPools: CONFIG.MAX_POOLS,
 
     mode: "TEST",
@@ -1687,9 +1882,12 @@ app.get("/security", (req, res) => {
       p => !p.buyEligible
     ).length,
 
+    catalogPools: poolCatalog.size,
+
     discovery: {
       provider: "GECKOTERMINAL",
-      lastError: geckoLastError
+      lastError: geckoLastError,
+      currentFeed: geckoCurrentFeed
     },
 
     jupiter: {
@@ -1725,6 +1923,9 @@ app.get("/security", (req, res) => {
       change5m: p.change5m,
       change1h: p.change1h,
 
+      ageMinutes: p.ageMinutes,
+      volumeLiquidityRatio: p.volumeLiquidityRatio,
+
       buyEligible: p.buyEligible,
       authorityVerified: p.authorityVerified,
 
@@ -1741,32 +1942,26 @@ app.get("/security", (req, res) => {
 
 // --------------------------------------------------
 // TEST GECKOTERMINAL
+// Ne déclenche pas de nouvel appel API.
 // --------------------------------------------------
 
-app.get("/gecko-test", async (req, res) => {
-  try {
-    const response = await geckoRequest(GECKO_FEEDS[0]);
+app.get("/gecko-test", (req, res) => {
+  res.json({
+    ok: !isGeckoCooldown(),
+    provider: "GECKOTERMINAL",
+    currentFeed: geckoCurrentFeed,
+    catalogPools: poolCatalog.size,
+    callsCount: geckoCallsCount,
+    lastCheck: geckoLastCheck,
+    lastError: geckoLastError,
 
-    res.json({
-      ok: true,
-      provider: "GECKOTERMINAL",
-      poolsReceived: response.data.length,
-      lastCheck: geckoLastCheck,
-      cooldownSeconds: Math.max(
-        0,
-        Math.ceil(
-          (geckoCooldownUntil - Date.now()) / 1000
-        )
+    cooldownSeconds: Math.max(
+      0,
+      Math.ceil(
+        (geckoCooldownUntil - Date.now()) / 1000
       )
-    });
-
-  } catch (error) {
-    res.status(503).json({
-      ok: false,
-      provider: "GECKOTERMINAL",
-      error: error.message
-    });
-  }
+    )
+  });
 });
 
 // --------------------------------------------------
@@ -1858,9 +2053,11 @@ app.post("/test/stop", (req, res) => {
 // --------------------------------------------------
 
 app.listen(PORT, () => {
-  console.log("CART3R.JAILBREAK GECKO V4 démarré");
+  console.log("CART3R.JAILBREAK GECKO V5 démarré");
   console.log("Découverte : GECKOTERMINAL");
+  console.log("Rotation : un flux par scan");
   console.log("Maximum : 100 pools");
+  console.log("Catalogue cumulatif : 300 pools maximum");
 
   console.log(
     "HELIUS : " +
