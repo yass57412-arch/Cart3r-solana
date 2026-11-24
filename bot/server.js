@@ -85,7 +85,9 @@ const state = {
     lastError: null,
     transactionsSeen: 0,
     swapsDecoded: 0,
-    reconnects: 0
+    reconnects: 0,
+    rpc429Retries: 0,
+    droppedQueuedTransactions: 0
   },
   jupiter: {
     configured: Boolean(JUPITER_API_KEY),
@@ -153,25 +155,51 @@ async function fetchJson(url, options = {}, timeoutMs = CONFIG.rpcTimeoutMs) {
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
     const body = await response.text();
-    let json;
-    try { json = body ? JSON.parse(body) : {}; }
-    catch (_) { throw new Error("Réponse JSON invalide (HTTP " + response.status + ")"); }
-    if (!response.ok) throw new Error("HTTP " + response.status + ": " + (json.error?.message || body.slice(0, 160)));
+    let json = {};
+    try { json = body ? JSON.parse(body) : {}; } catch (_) {}
+    if (!response.ok) {
+      const detail = json.error?.message || body.slice(0, 160) || response.statusText;
+      throw new Error("HTTP " + response.status + ": " + detail);
+    }
+    if (body && !Object.keys(json).length) throw new Error("Réponse JSON invalide (HTTP " + response.status + ")");
     return json;
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function heliusRpc(method, params) {
+// Serialize Helius HTTP RPC calls to avoid bursts that trigger HTTP 429.
+let heliusRpcTail = Promise.resolve();
+let lastHeliusRpcAt = 0;
+async function executeHeliusRpc(method, params) {
   if (!HELIUS_RPC_URL) throw new Error("HELIUS_RPC_URL non configurée");
-  const json = await fetchJson(HELIUS_RPC_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params })
-  });
-  if (json.error) throw new Error(json.error.message || "Erreur RPC Helius");
-  return json.result;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const wait = Math.max(0, 350 - (Date.now() - lastHeliusRpcAt));
+    if (wait) await sleep(wait);
+    lastHeliusRpcAt = Date.now();
+    try {
+      const json = await fetchJson(HELIUS_RPC_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params })
+      });
+      if (json.error) throw new Error(json.error.message || "Erreur RPC Helius");
+      return json.result;
+    } catch (e) {
+      if (!/429|rate.?limit|too many requests/i.test(safeError(e)) || attempt === 3) throw e;
+      const delay = 1200 * Math.pow(2, attempt);
+      state.helius.rpc429Retries++;
+      await sleep(delay);
+    }
+  }
+}
+function heliusRpc(method, params) {
+  const task = heliusRpcTail.then(
+    () => executeHeliusRpc(method, params),
+    () => executeHeliusRpc(method, params)
+  );
+  heliusRpcTail = task.catch(() => {});
+  return task;
 }
 
 function mintBalanceMap(rows) {
@@ -518,7 +546,7 @@ async function processSignature(signature, dexName, slot) {
 }
 
 async function drainQueue() {
-  while (state.running && state.processing < 3 && state.signatureQueue.length) {
+  while (state.running && state.processing < 1 && state.signatureQueue.length) {
     const item = state.signatureQueue.shift();
     state.processing++;
     processSignature(item.signature, item.dexName, item.slot)
@@ -599,6 +627,11 @@ function startHeliusSocket() {
       const subId = result?.subscription;
       const program = subscriptions.get(subId);
       state.helius.transactionsSeen++;
+      // Keep the newest events if the RPC backlog grows beyond a safe bound.
+      if (state.signatureQueue.length >= 300) {
+        state.signatureQueue.shift();
+        state.helius.droppedQueuedTransactions++;
+      }
       state.signatureQueue.push({ signature, dexName: program?.name || "DEX Solana", slot: result?.context?.slot || null });
       drainQueue();
     });
