@@ -39,6 +39,8 @@ button:disabled{opacity:.4;cursor:not-allowed}
 .real-panel{border:1px solid #805bc1;background:#201a32;border-radius:12px;padding:13px;margin:12px 0}
 .real-title{font-size:22px;font-weight:800;color:var(--purple)}
 .warning{border:1px solid #9c7040;background:#302315;padding:11px;border-radius:9px;color:#ffdda8;font-size:12px;line-height:1.5;margin:10px 0}
+.alert{border:1px solid var(--red);background:#351722;color:#ffc1ca;padding:11px;border-radius:9px;font-size:12px;line-height:1.5;margin-top:9px}
+.safe{border:1px solid #287c60;background:#102b25;color:#a8f3d5;padding:10px;border-radius:9px;font-size:12px;line-height:1.5;margin-top:9px}
 .position-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
 a{color:#79a9ff;overflow-wrap:anywhere}
 @media(max-width:560px){.grid{grid-template-columns:1fr}.stats{display:grid;grid-template-columns:1fr 1fr}}
@@ -61,6 +63,7 @@ a{color:#79a9ff;overflow-wrap:anywhere}
 <button onclick="applyFilters()">Appliquer les filtres</button>
 <button class="secondary" onclick="loadPools()">Actualiser maintenant</button>
 <div id="status" class="diagnostic">Démarrage du scanner…</div>
+<div id="networkAlert"></div>
 </section>
 
 <section class="panel">
@@ -81,17 +84,12 @@ a{color:#79a9ff;overflow-wrap:anywhere}
 <div id="phantomStatus" class="diagnostic">Portefeuille Phantom non connecté.</div>
 <button onclick="connectPhantom()">Connecter Phantom</button>
 <button class="secondary" onclick="disconnectPhantom()">Déconnecter</button>
-
 <div class="warning">
 Les transactions sont réelles et peuvent entraîner une perte totale ou partielle des fonds. Vérifie toujours le jeton, le montant, les frais et la route dans Phantom avant de signer.
 </div>
-
 <label for="realAmount">Montant d'achat en SOL</label>
 <input id="realAmount" type="number" min="0.001" step="0.001" value="0.01">
-
-<div class="diagnostic">
-Le mode réel reste verrouillé au démarrage. Le déverrouillage ne signe aucune transaction.
-</div>
+<div class="diagnostic">Le mode réel reste verrouillé au démarrage. Le déverrouillage ne signe aucune transaction.</div>
 <button id="unlockRealBtn" class="secondary" onclick="unlockRealMode()">Déverrouiller le mode réel</button>
 <div id="realLockStatus" class="diagnostic">Mode réel verrouillé.</div>
 <div id="pendingTrade" class="diagnostic">Aucun ordre en attente.</div>
@@ -100,7 +98,7 @@ Le mode réel reste verrouillé au démarrage. Le déverrouillage ne signe aucun
 </div>
 
 <h2 style="margin-top:18px">Positions réelles suivies</h2>
-<div class="notice">Stop-loss et take-profit surveillés à partir des nouveaux cours reçus. Une vente déclenchée doit être signée dans Phantom.</div>
+<div class="notice">Stop-loss et take-profit surveillés à partir des nouveaux cours reçus. Toute vente doit être signée dans Phantom.</div>
 <div id="realPositions" class="notice">Aucune position réelle suivie.</div>
 
 <h2 style="margin-top:18px">Historique réel</h2>
@@ -108,13 +106,14 @@ Le mode réel reste verrouillé au démarrage. Le déverrouillage ne signe aucun
 </section>
 
 <section class="panel">
-<h2>Diagnostic du scanner</h2>
+<h2>Diagnostic de sécurité</h2>
 <div id="diagnostics" class="diagnostic">En attente des premières données.</div>
+<div id="positionDiagnostics" class="diagnostic">Surveillance des positions en attente.</div>
 </section>
 
 <section class="panel notice">
 <strong>À savoir</strong><br>
-Le scanner collecte jusqu'à 100 pools progressivement. Les cours peuvent être retardés ou indisponibles. Le suivi fonctionne uniquement lorsque la page reste ouverte et active. Si l'iPhone suspend la page, si le réseau tombe ou si la route de vente est indisponible, le seuil peut être dépassé avant la signature. Aucun stop-loss ne garantit un prix de sortie.
+CART3R fonctionne uniquement lorsque la page reste ouverte et active. Une coupure réseau, une suspension de l'iPhone ou une route de vente indisponible peut empêcher la préparation d'une vente. Les cours et les seuils sont indicatifs : aucun stop-loss ne garantit un prix de sortie.
 </section>
 </main>
 
@@ -125,24 +124,40 @@ const RPC='https://api.mainnet-beta.solana.com';
 const SOL_MINT='So11111111111111111111111111111111111111112';
 const REAL_POS_KEY='cart3r_real_positions_v2';
 const REAL_KEY='cart3r_real_history_v2';
-const REFRESH_MS=5000;
+
 const MAX_POOLS=100;
 const DEFAULT_SL=-10;
 const DEFAULT_TP=25;
+
+/* PROTECTION RÉSEAU */
+const GECKO_MIN_GAP=8000;
+const SCAN_INTERVAL=15000;
+const POSITION_INTERVAL=60000;
+const SCANNER_STALE_MS=45000;
+const POSITION_STALE_MS=120000;
 
 let allPools=[];
 let poolPages={};
 let pageNumber=1;
 let loading=false;
 let timer=null;
+let positionTimer=null;
 let positionBusy=false;
+let positionIndex=0;
+
+let geckoQueue=Promise.resolve();
+let geckoNextAllowedAt=0;
+let geckoBlockedUntil=0;
+
+let lastScannerSuccessAt=0;
+let lastPositionSuccessAt=0;
+let lastJupiterOrderAt=0;
 
 let phantomProvider=null;
 let phantomAddress=null;
 let liveUnlocked=false;
 let pendingTrade=null;
 let realBusy=false;
-let lastJupiterOrderAt=0;
 
 let realPositions=readStorage(REAL_POS_KEY,[]);
 let realHistory=readStorage(REAL_KEY,[]);
@@ -154,8 +169,12 @@ function readStorage(key,fallback){
  }catch(e){return fallback}
 }
 function saveRealData(){
- localStorage.setItem(REAL_POS_KEY,JSON.stringify(realPositions));
- localStorage.setItem(REAL_KEY,JSON.stringify(realHistory.slice(0,100)));
+ try{
+  localStorage.setItem(REAL_POS_KEY,JSON.stringify(realPositions));
+  localStorage.setItem(REAL_KEY,JSON.stringify(realHistory.slice(0,100)));
+ }catch(e){
+  console.warn('Sauvegarde locale impossible',e);
+ }
 }
 function num(v){
  const n=Number(v);
@@ -173,18 +192,56 @@ function shortAddress(s){
  return s?String(s).slice(0,5)+'…'+String(s).slice(-5):'';
 }
 function attrs(pool){return pool.attributes||{}}
+function ageText(timestamp){
+ if(!timestamp)return 'jamais';
+ const seconds=Math.max(0,Math.floor((Date.now()-timestamp)/1000));
+ if(seconds<60)return seconds+' s';
+ return Math.floor(seconds/60)+' min';
+}
+
+/* FILE D'ATTENTE COMMUNE POUR TOUTES LES REQUÊTES GECKOTERMINAL */
+function geckoFetchJson(url){
+ const task=geckoQueue.then(async()=>{
+  const wait=Math.max(
+   0,
+   geckoNextAllowedAt-Date.now(),
+   geckoBlockedUntil-Date.now()
+  );
+  if(wait)await new Promise(resolve=>setTimeout(resolve,wait));
+
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),15000);
+
+  try{
+   const response=await fetch(url,{
+    headers:{accept:'application/json','accept-version':'20230302'},
+    signal:controller.signal
+   });
+
+   geckoNextAllowedAt=Date.now()+GECKO_MIN_GAP;
+
+   if(response.status===429){
+    geckoBlockedUntil=Date.now()+60000;
+    throw new Error('API temporairement limitée (429). Pause de 60 secondes.');
+   }
+   if(response.status===503||response.status===502){
+    geckoBlockedUntil=Date.now()+30000;
+    throw new Error('API temporairement indisponible. Pause de 30 secondes.');
+   }
+   if(!response.ok)throw new Error('HTTP '+response.status);
+
+   return await response.json();
+  }finally{
+   clearTimeout(timeout);
+  }
+ });
+
+ geckoQueue=task.catch(()=>{});
+ return task;
+}
 
 async function fetchJson(url){
- const controller=new AbortController();
- const timeout=setTimeout(()=>controller.abort(),12000);
- try{
-  const response=await fetch(url,{
-   headers:{accept:'application/json','accept-version':'20230302'},
-   signal:controller.signal
-  });
-  if(!response.ok)throw new Error('HTTP '+response.status);
-  return await response.json();
- }finally{clearTimeout(timeout)}
+ return geckoFetchJson(url);
 }
 
 function getChange(a){
@@ -224,8 +281,8 @@ function scorePool(p){
  const vol=p.vol;
  const change=p.change??0;
  const ratio=liq>0?vol/liq:0;
-
  let score=35;
+
  if(liq>=100000)score+=18;
  else if(liq>=50000)score+=14;
  else if(liq>=20000)score+=9;
@@ -262,19 +319,24 @@ function passing(){
  const minL=num(document.getElementById('minLiq').value);
  const minV=num(document.getElementById('minVol').value);
  const maxD=num(document.getElementById('maxDrop').value);
+
  return allPools
   .filter(p=>p.liq>=minL&&p.vol>=minV&&p.change!==null&&p.change>=-maxD)
   .sort((a,b)=>b.score-a.score);
 }
-
 function applyFilters(){renderPools()}
+
+function scannerIsFresh(){
+ return lastScannerSuccessAt>0&&Date.now()-lastScannerSuccessAt<=SCANNER_STALE_MS;
+}
 
 function renderPools(){
  const list=document.getElementById('poolList');
  const good=passing();
+
  document.getElementById('received').textContent=allPools.length+' / '+MAX_POOLS;
  document.getElementById('passed').textContent=good.length;
- document.getElementById('bestScore').textContent=good.length?good[0].score+' %':'—';
+ document.getElementById('bestScore').textContent=good.length?good[0].score+' / 100':'—';
 
  if(!allPools.length){
   list.textContent='Aucune donnée chargée.';
@@ -289,6 +351,7 @@ function renderPools(){
   const opinion=verdict(p);
   const color=p.score>=75?'good':p.score>=55?'purple':'bad';
   const change=p.change===null?'indisponible':(p.change>0?'+':'')+p.change.toFixed(2)+' %';
+
   return `
   <div class="pool">
    <div class="pooltop">
@@ -300,7 +363,7 @@ function renderPools(){
    <div class="meta">Variation 24 h : ${change} • Prix : ${p.price?'$'+p.price:'indisponible'}</div>
    <div class="meta">Analyse : ${analysisText(p)}</div>
    <div class="actions">
-    <button onclick="prepareRealBuy('${encodeURIComponent(p.id)}')">Acheter avec Phantom</button>
+    <button ${scannerIsFresh()?'':'disabled'} onclick="prepareRealBuy('${encodeURIComponent(p.id)}')">Acheter avec Phantom</button>
     <a href="${p.url}" target="_blank" rel="noopener">Voir le pool</a>
    </div>
   </div>`;
@@ -317,6 +380,18 @@ function analysisText(p){
  else if(p.change>30)reasons.push('hausse déjà importante');
  else reasons.push('momentum faible ou négatif');
  return reasons.join(' • ')+'.';
+}
+
+function updateNetworkDisplay(){
+ const alert=document.getElementById('networkAlert');
+ const age=lastScannerSuccessAt?Date.now()-lastScannerSuccessAt:Infinity;
+
+ if(age>SCANNER_STALE_MS){
+  alert.innerHTML='<div class="alert">ALERTE : les cours du scanner ne sont plus à jour. Les achats sont bloqués. Dernière donnée reçue : '+ageText(lastScannerSuccessAt)+'.</div>';
+ }else{
+  alert.innerHTML='<div class="safe">Données du scanner récentes • Dernière réception il y a '+ageText(lastScannerSuccessAt)+'.</div>';
+ }
+ renderPools();
 }
 
 function getPhantom(){
@@ -418,6 +493,12 @@ async function prepareRealBuy(encodedId){
  if(!liveUnlocked){alert('Connecte Phantom et déverrouille le mode réel.');return}
  if(realBusy)return;
 
+ if(!scannerIsFresh()){
+  alert('ACHAT BLOQUÉ : les cours du scanner ne sont pas suffisamment récents. Attends une actualisation réussie.');
+  updateNetworkDisplay();
+  return;
+ }
+
  const p=allPools.find(x=>x.id===decodeURIComponent(encodedId));
  if(!p||!p.mint){alert('Adresse du jeton introuvable.');return}
  if(!(p.price>0)){alert('Prix du jeton indisponible. Achat suspendu.');return}
@@ -464,7 +545,7 @@ async function prepareRealBuy(encodedId){
    ' • Dépense : '+amountSol+' SOL • Sortie estimée : '+
    output.toLocaleString('fr-FR',{maximumFractionDigits:8})+
    ' '+(p.symbol||'jetons')+
-   ' • Prix de référence : $'+p.price+
+   ' • Prix de référence indicatif : $'+p.price+
    '. Vérifie la transaction dans Phantom.';
   document.getElementById('signTradeBtn').disabled=false;
  }catch(e){
@@ -495,14 +576,11 @@ async function prepareRealSell(mint,encodedName,automatic=false){
  if(!phantomAddress||realBusy)return;
 
  const position=realPositions.find(x=>x.mint===mint);
- if(!position){
-  document.getElementById('pendingTrade').textContent='Position introuvable.';
-  return;
- }
+ if(!position)return;
 
  realBusy=true;
  document.getElementById('pendingTrade').textContent=automatic?
- 'Seuil atteint : préparation automatique de la vente…':
+ 'Seuil atteint : préparation de la vente…':
  'Lecture du solde du jeton…';
  document.getElementById('signTradeBtn').disabled=true;
 
@@ -525,16 +603,23 @@ async function prepareRealSell(mint,encodedName,automatic=false){
   };
 
   document.getElementById('pendingTrade').textContent=
-   (automatic?'SEUIL ATTEINT — VENTE PRÉPARÉE AUTOMATIQUEMENT. ':'VENTE À CONFIRMER — ')+
+   (automatic?'SEUIL ATTEINT — VENTE PRÉPARÉE. ':'VENTE À CONFIRMER — ')+
    name+' • Sortie estimée : '+solEstimate.toFixed(6)+' SOL'+
    ' • Solde entier détecté. Signe uniquement après vérification dans Phantom.';
   document.getElementById('signTradeBtn').disabled=false;
+
+  position.autoPending=true;
+  position.autoPendingAt=Date.now();
+  position.priceStatus='seuil atteint : vente préparée, signature requise';
+  saveRealData();
  }catch(e){
   position.autoPending=false;
+  position.lastSellError=Date.now();
+  position.priceStatus='vente non préparée : '+(e.message||e);
   saveRealData();
   document.getElementById('pendingTrade').textContent=
    'Préparation de vente impossible : '+(e.message||e)+
-   '. La position reste suivie et pourra être réessayée.';
+   '. La position reste suivie. Vérifie-la manuellement.';
  }finally{
   realBusy=false;
   renderRealPositions();
@@ -611,7 +696,7 @@ async function signAndExecuteTrade(){
     takeProfit:DEFAULT_TP,
     lastPrice:trade.entryPrice||0,
     lastPriceAt:null,
-    priceStatus:'prix de référence avant achat',
+    priceStatus:'en attente du premier cours après achat',
     autoPending:false
    });
   }else{
@@ -640,23 +725,21 @@ async function signAndExecuteTrade(){
 }
 
 function updateRisk(mint,field,value){
- const p=realPositions.find(x=>x.mint===mint);
+ const p=realPositions.find(x=>x.mint===decodeURIComponent(mint));
  if(!p)return;
  const n=Number(value);
  if(!Number.isFinite(n))return;
 
- if(field==='stopLoss'){
-  p.stopLoss=Math.max(-99,Math.min(-0.1,n));
- }
- if(field==='takeProfit'){
-  p.takeProfit=Math.max(0.1,Math.min(10000,n));
- }
+ if(field==='stopLoss')p.stopLoss=Math.max(-99,Math.min(-0.1,n));
+ if(field==='takeProfit')p.takeProfit=Math.max(0.1,Math.min(10000,n));
+
  saveRealData();
  renderRealPositions();
 }
 
 function renderRealPositions(){
  const el=document.getElementById('realPositions');
+
  if(!realPositions.length){
   el.textContent='Aucune position réelle suivie.';
   return;
@@ -666,8 +749,10 @@ function renderRealPositions(){
   const entry=num(p.entryPrice);
   const current=num(p.lastPrice);
   const pct=entry>0&&current>0?(current/entry-1)*100:null;
-  const state=p.autoPending?'VENTE EN PRÉPARATION':
-   p.priceStatus||'En attente de cours';
+  const priceAge=p.lastPriceAt?Date.now()-new Date(p.lastPriceAt).getTime():Infinity;
+  const stale=priceAge>POSITION_STALE_MS;
+  const state=p.autoPending?'VENTE PRÉPARÉE — SIGNATURE REQUISE':
+   (stale?'ALERTE : COURS NON ACTUALISÉ':p.priceStatus||'En attente de cours');
 
   return `
   <div class="pool">
@@ -675,7 +760,8 @@ function renderRealPositions(){
    <div class="meta">Mint : ${escapeHtml(p.mint)}</div>
    <div class="meta">Prix de référence avant achat : ${entry?'$'+entry:'indisponible'}</div>
    <div class="meta">Dernier cours reçu : ${current?'$'+current:'indisponible'} • Variation indicative : ${pct===null?'indisponible':(pct>=0?'+':'')+pct.toFixed(2)+' %'}</div>
-   <div class="meta">Diagnostic : ${escapeHtml(state)}</div>
+   <div class="meta">Âge du dernier cours : ${p.lastPriceAt?ageText(new Date(p.lastPriceAt).getTime()):'aucun cours reçu'}</div>
+   <div class="${stale?'bad':'good'} meta">Diagnostic : ${escapeHtml(state)}</div>
    <div class="position-controls">
     <div>
      <label>Stop-loss (%)</label>
@@ -708,67 +794,82 @@ function renderRealHistory(){
   </div>`).join('');
 }
 
-/* SURVEILLANCE DES POSITIONS RÉELLES */
+/* SURVEILLANCE : UN POOL DE POSITION PAR CYCLE */
 async function monitorRealPositions(){
  if(positionBusy||document.hidden||!phantomAddress||!realPositions.length)return;
+
+ const eligible=realPositions.filter(p=>p.poolId&&!p.autoPending);
+ if(!eligible.length){
+  document.getElementById('positionDiagnostics').textContent=
+   'Aucune position actuellement disponible pour la surveillance automatique.';
+  return;
+ }
+
  positionBusy=true;
 
  try{
-  for(const p of [...realPositions]){
-   if(!p.poolId||p.autoPending)continue;
+  if(positionIndex>=eligible.length)positionIndex=0;
+  const p=eligible[positionIndex];
+  positionIndex=(positionIndex+1)%eligible.length;
 
-   try{
-    const url='https://api.geckoterminal.com/api/v2/networks/solana/pools/'+encodeURIComponent(p.poolId);
-    const j=await fetchJson(url);
-    const price=num(j?.data?.attributes?.base_token_price_usd);
+  const url='https://api.geckoterminal.com/api/v2/networks/solana/pools/'+encodeURIComponent(p.poolId);
+  const j=await fetchJson(url);
+  const price=num(j?.data?.attributes?.base_token_price_usd);
 
-    if(!(price>0)){
-     p.priceStatus='prix indisponible';
-     continue;
-    }
+  if(!(price>0))throw new Error('Prix du jeton indisponible.');
 
-    p.lastPrice=price;
-    p.lastPriceAt=new Date().toISOString();
-    p.priceStatus='nouveau cours reçu';
+  p.lastPrice=price;
+  p.lastPriceAt=new Date().toISOString();
+  p.priceStatus='cours actualisé';
+  lastPositionSuccessAt=Date.now();
 
-    const entry=num(p.entryPrice);
-    if(!(entry>0))continue;
+  const entry=num(p.entryPrice);
+  if(entry>0){
+   const change=(price/entry-1)*100;
+   const sl=num(p.stopLoss??DEFAULT_SL);
+   const tp=num(p.takeProfit??DEFAULT_TP);
 
-    const change=(price/entry-1)*100;
-    const sl=num(p.stopLoss??DEFAULT_SL);
-    const tp=num(p.takeProfit??DEFAULT_TP);
+   if(change<=sl||change>=tp){
+    p.autoPending=true;
+    p.priceStatus='seuil atteint : préparation de vente';
+    saveRealData();
+    renderRealPositions();
 
-    if(change<=sl||change>=tp){
-     p.autoPending=true;
-     saveRealData();
-     renderRealPositions();
-
-     await prepareRealSell(
-      p.mint,
-      encodeURIComponent(p.name||p.mint),
-      true
-     );
-     break;
-    }
-   }catch(e){
-    p.priceStatus=e.name==='AbortError'?'délai dépassé':'échec réseau';
+    await prepareRealSell(
+     p.mint,
+     encodeURIComponent(p.name||p.mint),
+     true
+    );
    }
   }
+
+  document.getElementById('positionDiagnostics').textContent=
+   'Surveillance réussie : '+p.name+
+   ' • Dernier cours reçu il y a quelques secondes.';
+
+ }catch(e){
+  const current=eligible[Math.max(0,positionIndex-1)]||eligible[0];
+  if(current)current.priceStatus='échec réseau : '+(e.message||e);
+  document.getElementById('positionDiagnostics').textContent=
+   'ALERTE SURVEILLANCE : '+(e.message||e)+
+   '. La position n’a pas pu être vérifiée.';
+ }finally{
   saveRealData();
   renderRealPositions();
- }finally{
   positionBusy=false;
  }
 }
 
-/* COLLECTE PROGRESSIVE DE 5 PAGES DE 20 POOLS */
+/* CHARGEMENT DES 5 PAGES */
 function rebuildPools(){
  const merged=new Map();
+
  for(let page=1;page<=5;page++){
   for(const p of (poolPages[page]||[])){
    if(p?.id)merged.set(p.id,mapPool(p));
   }
  }
+
  allPools=[...merged.values()].slice(0,MAX_POOLS);
  allPools.forEach(p=>p.score=scorePool(p));
  renderPools();
@@ -777,43 +878,53 @@ function rebuildPools(){
 async function fetchPoolPage(page){
  const url=API+'&page='+page;
  const j=await fetchJson(url);
+
  if(!Array.isArray(j.data))throw new Error('Réponse GeckoTerminal invalide.');
+
  poolPages[page]=j.data;
  rebuildPools();
+ lastScannerSuccessAt=Date.now();
+ updateNetworkDisplay();
+
  return j.data.length;
 }
 
 async function refreshCycle(){
  if(loading||document.hidden)return;
  loading=true;
+
  const status=document.getElementById('status');
  const diagnostics=document.getElementById('diagnostics');
+ let nextDelay=SCAN_INTERVAL;
 
  try{
-  status.textContent='Actualisation de la page '+pageNumber+'/5…';
+  status.textContent='Chargement de la page '+pageNumber+'/5…';
+
   const count=await fetchPoolPage(pageNumber);
 
   diagnostics.textContent=
    'Page '+pageNumber+' reçue : '+count+
    ' pools • Total unique chargé : '+allPools.length+
-   ' • Actualisation progressive toutes les 5 secondes.';
+   ' • Requêtes espacées pour limiter les erreurs réseau.';
 
-  await monitorRealPositions();
-
-  const now=new Date().toLocaleTimeString('fr-FR');
-  status.textContent='Dernière actualisation : '+now+
+  status.textContent=
+   'Dernière actualisation : '+new Date().toLocaleTimeString('fr-FR')+
    ' • '+allPools.length+' pools chargés • Page '+pageNumber+'/5';
 
   pageNumber=pageNumber>=5?1:pageNumber+1;
 
  }catch(e){
-  status.textContent='Erreur réseau : '+(e.message||e)+
-   ' • Nouvelle tentative dans 5 secondes.';
-  diagnostics.textContent='Le scanner conserve les dernières données reçues. '+(e.message||e);
+  const message=e.message||String(e);
+  status.textContent='Erreur réseau : '+message;
+  diagnostics.textContent=
+   'Le scanner conserve les dernières données reçues. Les achats sont bloqués si les cours deviennent trop anciens.';
+
+  nextDelay=message.includes('429')?65000:30000;
  }finally{
   loading=false;
+  updateNetworkDisplay();
   clearTimeout(timer);
-  timer=setTimeout(refreshCycle,REFRESH_MS);
+  timer=setTimeout(refreshCycle,nextDelay);
  }
 }
 
@@ -823,22 +934,35 @@ function loadPools(){
  refreshCycle();
 }
 
+function startPositionMonitoring(){
+ clearInterval(positionTimer);
+ positionTimer=setInterval(()=>{
+  if(!document.hidden)monitorRealPositions();
+ },POSITION_INTERVAL);
+}
+
 document.addEventListener('visibilitychange',()=>{
  if(!document.hidden){
   clearTimeout(timer);
   refreshCycle();
+  monitorRealPositions();
+ }else{
+  document.getElementById('status').textContent=
+   'Page en arrière-plan : actualisation suspendue. Les positions ne sont plus surveillées.';
  }
 });
 
 window.addEventListener('beforeunload',()=>{
  clearTimeout(timer);
+ clearInterval(positionTimer);
 });
 
 renderRealLock();
 renderRealPositions();
 renderRealHistory();
+updateNetworkDisplay();
+startPositionMonitoring();
 refreshCycle();
 </script>
 </body>
 </html>
-
