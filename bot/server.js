@@ -14,6 +14,15 @@
 const express = require("express");
 const app = express();
 app.use(express.json({ limit: "100kb" }));
+// Public read-only CORS for the GitHub Pages dashboard.
+// Only GET/OPTIONS are allowed; this does not expose trading or write endpoints.
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 
 const PORT = Number(process.env.PORT || 3000);
 const HELIUS_RPC_URL = String(process.env.HELIUS_RPC_URL || "").trim();
