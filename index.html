@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -6,11 +7,11 @@
 <title>CART3R.JAILBREAK</title>
 <script src="https://unpkg.com/@solana/web3.js@1/lib/index.iife.min.js"></script>
 <style>
-:root{color-scheme:dark;--bg:#0b1020;--panel:#151d32;--line:#293653;--txt:#edf2ff;--muted:#9eacc8;--green:#35d39a;--red:#ff687d}
+:root{color-scheme:dark;--bg:#0b1020;--panel:#151d32;--line:#293653;--txt:#edf2ff;--muted:#9eacc8;--green:#35d39a;--red:#ff687d;--purple:#c8a8ff}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--txt);font:15px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:16px}
-header,main{max-width:900px;margin:auto}
-h1{color:var(--green)}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:15px}
+header,main{max-width:950px;margin:auto}
+h1{color:var(--green);margin-bottom:4px}
 h2{font-size:17px;margin:0 0 12px}
 .sub,.notice,.meta{color:var(--muted);font-size:12px;line-height:1.5}
 main{display:grid;gap:14px;margin-top:16px}
@@ -21,54 +22,56 @@ input,select{width:100%;padding:11px;border-radius:9px;border:1px solid var(--li
 button{border:0;border-radius:10px;padding:11px 14px;background:var(--green);color:#06140f;font-weight:700;font-size:14px;cursor:pointer;margin:8px 6px 0 0}
 button.secondary{background:#2a3a5d;color:var(--txt)}
 button.sell{background:#ff8292;color:#25050a}
-button:disabled{opacity:.45;cursor:not-allowed}
+button:disabled{opacity:.4;cursor:not-allowed}
 .stats{display:flex;gap:10px;flex-wrap:wrap}
 .stat{background:#0c1427;border:1px solid var(--line);padding:10px;border-radius:10px;flex:1;min-width:120px}
 .stat small{display:block;color:var(--muted)}
 .stat strong{font-size:19px}
 .diagnostic{padding:10px;background:#0c1427;border:1px solid var(--line);border-radius:9px;color:var(--muted);font-size:13px;line-height:1.5;margin-top:8px;overflow-wrap:anywhere}
-.pool{border-top:1px solid var(--line);padding:12px 0}
+.pool{border-top:1px solid var(--line);padding:13px 0}
 .pooltop{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.token,.leverage{font-weight:700;color:var(--green)}
+.token{font-weight:800;color:var(--green)}
 .pill{border:1px solid var(--line);border-radius:30px;padding:4px 8px;font-size:11px;color:var(--muted)}
-.actions{display:flex;gap:6px;flex-wrap:wrap}
-.actions button{margin-top:4px}
-.leverage-panel{border:1px solid var(--green);background:#102b28;border-radius:12px;padding:13px;margin:12px 0}
-.leverage-title{font-size:25px;font-weight:800;color:var(--green)}
-.trailing-panel{border:1px solid #49618b;background:#101d35;border-radius:12px;padding:13px;margin:12px 0}
-.real-panel{border:1px solid #b18cff;background:#201a32;border-radius:12px;padding:13px;margin:12px 0}
-.real-title{font-size:22px;font-weight:800;color:#c8a8ff}
+.actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.actions button{margin-top:5px}
+.score{font-size:13px;font-weight:800;color:var(--green)}
+.good{color:var(--green)}.bad{color:var(--red)}.purple{color:var(--purple)}
+.real-panel{border:1px solid #805bc1;background:#201a32;border-radius:12px;padding:13px;margin:12px 0}
+.real-title{font-size:22px;font-weight:800;color:var(--purple)}
 .warning{border:1px solid #9c7040;background:#302315;padding:11px;border-radius:9px;color:#ffdda8;font-size:12px;line-height:1.5;margin:10px 0}
-a{color:#79a9ff}
+.position-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+a{color:#79a9ff;overflow-wrap:anywhere}
 @media(max-width:560px){.grid{grid-template-columns:1fr}.stats{display:grid;grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
 <header>
 <h1>CART3R.JAILBREAK</h1>
-<div class="sub">Scanner Solana • Leviers simulés • Trading Phantom • Actualisation automatique</div>
+<div class="sub">SOLANA MEMECOIN SCANNER • 100 POOLS • PHANTOM TRADING RÉEL</div>
 </header>
-<main>
 
+<main>
 <section class="panel">
-<h2>Filtres de détection</h2>
+<h2>Filtres du scanner</h2>
 <div class="grid">
-<div><label for="minLiq">Liquidité minimum (USD)</label><input id="minLiq" type="number" value="10000" min="0"></div>
-<div><label for="minVol">Volume 24 h minimum (USD)</label><input id="minVol" type="number" value="5000" min="0"></div>
+<div><label for="minLiq">Liquidité minimum ($)</label><input id="minLiq" type="number" value="10000" min="0"></div>
+<div><label for="minVol">Volume 24 h minimum ($)</label><input id="minVol" type="number" value="5000" min="0"></div>
 <div><label for="maxDrop">Baisse maximum 24 h (%)</label><input id="maxDrop" type="number" value="10" min="0"></div>
 </div>
 <button onclick="applyFilters()">Appliquer les filtres</button>
-<button class="secondary" onclick="loadPools()">Actualiser les données</button>
+<button class="secondary" onclick="loadPools()">Actualiser maintenant</button>
 <div id="status" class="diagnostic">Démarrage du scanner…</div>
 </section>
 
 <section class="panel">
-<h2>Résultats des pools</h2>
+<h2>Scanner des 100 pools</h2>
 <div class="stats">
-<div class="stat"><small>Pools reçus</small><strong id="received">0</strong></div>
+<div class="stat"><small>Pools chargés</small><strong id="received">0 / 100</strong></div>
 <div class="stat"><small>Pools retenus</small><strong id="passed">0</strong></div>
+<div class="stat"><small>Meilleur score</small><strong id="bestScore">—</strong></div>
 </div>
-<div id="poolList" class="notice">Aucune donnée chargée.</div>
+<div class="notice" style="margin-top:10px">Classement indicatif basé sur le volume, la liquidité et le momentum. Le score ne prédit pas le rendement futur.</div>
+<div id="poolList" class="notice">Chargement des pools…</div>
 </section>
 
 <section class="panel">
@@ -78,16 +81,16 @@ a{color:#79a9ff}
 <div id="phantomStatus" class="diagnostic">Portefeuille Phantom non connecté.</div>
 <button onclick="connectPhantom()">Connecter Phantom</button>
 <button class="secondary" onclick="disconnectPhantom()">Déconnecter</button>
+
 <div class="warning">
-Le mode réel est verrouillé par défaut. Les achats et ventes ne sont jamais automatiques. Chaque transaction doit être vérifiée puis signée dans Phantom. Une transaction signée peut déplacer définitivement tes fonds.
+Les transactions sont réelles et peuvent entraîner une perte totale ou partielle des fonds. Vérifie toujours le jeton, le montant, les frais et la route dans Phantom avant de signer.
 </div>
-<div style="margin-top:12px">
-<label for="realAmount">Montant de l'achat en SOL</label>
+
+<label for="realAmount">Montant d'achat en SOL</label>
 <input id="realAmount" type="number" min="0.001" step="0.001" value="0.01">
-</div>
+
 <div class="diagnostic">
-<strong>Activation volontaire du trading réel</strong><br>
-Le bouton ci-dessous déverrouille uniquement les boutons de préparation. Il ne déclenche aucune transaction.
+Le mode réel reste verrouillé au démarrage. Le déverrouillage ne signe aucune transaction.
 </div>
 <button id="unlockRealBtn" class="secondary" onclick="unlockRealMode()">Déverrouiller le mode réel</button>
 <div id="realLockStatus" class="diagnostic">Mode réel verrouillé.</div>
@@ -97,156 +100,80 @@ Le bouton ci-dessous déverrouille uniquement les boutons de préparation. Il ne
 </div>
 
 <h2 style="margin-top:18px">Positions réelles suivies</h2>
-<div class="notice">Les soldes sont relus depuis la blockchain. Une vente porte sur la totalité du solde du jeton choisi.</div>
+<div class="notice">Stop-loss et take-profit surveillés à partir des nouveaux cours reçus. Une vente déclenchée doit être signée dans Phantom.</div>
 <div id="realPositions" class="notice">Aucune position réelle suivie.</div>
-<h2 style="margin-top:18px">Historique des transactions réelles</h2>
+
+<h2 style="margin-top:18px">Historique réel</h2>
 <div id="realHistory" class="notice">Aucune transaction enregistrée.</div>
 </section>
 
 <section class="panel">
-<h2>Portefeuille virtuel CART3R</h2>
-<div class="leverage-panel">
-<div class="leverage">SÉLECTEUR DE LEVIER SIMULÉ</div>
-<div class="leverage-title" id="leverageTitle">x3</div>
-<label for="leverageSelect">Choisir ton multiplicateur</label>
-<select id="leverageSelect" onchange="changeLeverage(this.value)">
-<option value="1">x1 — sans multiplicateur</option>
-<option value="2">x2 — modéré</option>
-<option value="3" selected>x3 — dynamique</option>
-<option value="5">x5 — agressif</option>
-</select>
-<div class="diagnostic" id="leverageInfo">Mise : 10 € • Exposition : 30 €</div>
-</div>
-<div class="trailing-panel">
-<strong>TRAILING STOP AUTOMATIQUE</strong>
-<div class="notice">Activation à +10 % depuis l'achat. Ensuite, le stop suit le plus haut cours reçu et reste 5 % en dessous.</div>
-</div>
-<div class="stats">
-<div class="stat"><small>Solde disponible</small><strong id="cash">100,00 €</strong></div>
-<div class="stat"><small>Valeur des positions</small><strong id="positions">0,00 €</strong></div>
-<div class="stat"><small>Valeur totale estimée</small><strong id="total">100,00 €</strong></div>
-</div>
-<p class="notice">Capital fictif initial : 100 €. Mise par achat : 10 €. Les positions existantes conservent leur levier initial.</p>
-<div class="diagnostic">
-<strong>Règles de simulation</strong><br>
-Alerte visuelle : +10 %.<br>
-Prise de bénéfice automatique : +20 %.<br>
-Protection automatique initiale : -10 %.<br>
-Trailing stop : activation à +10 %, puis seuil à 5 % sous le plus haut cours.
-</div>
-<h2 style="margin-top:18px">Diagnostic des cours</h2>
-<div id="priceDiagnostics" class="diagnostic">Aucune vérification effectuée.</div>
-<h2 style="margin-top:18px">Positions ouvertes</h2>
-<div id="positionList" class="notice">Aucune position ouverte.</div>
-<h2 style="margin-top:18px">Historique</h2>
-<div id="history" class="notice">Aucune opération.</div>
-<button class="secondary" onclick="resetWallet()">Réinitialiser la simulation</button>
+<h2>Diagnostic du scanner</h2>
+<div id="diagnostics" class="diagnostic">En attente des premières données.</div>
 </section>
 
 <section class="panel notice">
-<strong>Limites importantes</strong><br>
-Les cours peuvent être retardés ou indisponibles. Le scanner fonctionne lorsque la page est ouverte. Safari peut suspendre l'actualisation en arrière-plan. Le levier est uniquement simulé : aucun ordre réel n'est effectué par le portefeuille virtuel. Le trailing stop ne garantit pas le prix de sortie.
+<strong>À savoir</strong><br>
+Le scanner collecte jusqu'à 100 pools progressivement. Les cours peuvent être retardés ou indisponibles. Le suivi fonctionne uniquement lorsque la page reste ouverte et active. Si l'iPhone suspend la page, si le réseau tombe ou si la route de vente est indisponible, le seuil peut être dépassé avant la signature. Aucun stop-loss ne garantit un prix de sortie.
 </section>
 </main>
 
 <script>
 const API='https://api.geckoterminal.com/api/v2/networks/solana/new_pools?include=base_token,quote_token,dex';
-const KEY='cart3r_paper_wallet_v1';
-const REAL_KEY='cart3r_real_history_v1';
-const REAL_POS_KEY='cart3r_real_positions_v1';
 const JUP='https://api.jup.ag/swap/v2';
-const SOL_MINT='So11111111111111111111111111111111111111112';
 const RPC='https://api.mainnet-beta.solana.com';
-const STAKE=10;
-const ALLOWED_LEVERAGES=[1,2,3,5];
-const TRAIL_ACTIVATION=10;
-const TRAIL_DISTANCE=5;
+const SOL_MINT='So11111111111111111111111111111111111111112';
+const REAL_POS_KEY='cart3r_real_positions_v2';
+const REAL_KEY='cart3r_real_history_v2';
 const REFRESH_MS=5000;
+const MAX_POOLS=100;
+const DEFAULT_SL=-10;
+const DEFAULT_TP=25;
 
-let LEVERAGE=3;
 let allPools=[];
-let wallet=readWallet();
+let poolPages={};
+let pageNumber=1;
 let loading=false;
 let timer=null;
+let positionBusy=false;
 
-/* ETAT TRADING REEL : TOUJOURS VERROUILLE AU DEMARRAGE */
 let phantomProvider=null;
 let phantomAddress=null;
 let liveUnlocked=false;
 let pendingTrade=null;
 let realBusy=false;
 let lastJupiterOrderAt=0;
-let realPositions=readJsonStorage(REAL_POS_KEY,[]);
-let realHistory=readJsonStorage(REAL_KEY,[]);
 
-const euro=n=>Number(n||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
-const usd=n=>'$'+Number(n||0).toLocaleString('en-US',{maximumFractionDigits:0});
-const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
+let realPositions=readStorage(REAL_POS_KEY,[]);
+let realHistory=readStorage(REAL_KEY,[]);
 
-function readJsonStorage(key,fallback){
- try{const v=JSON.parse(localStorage.getItem(key));return Array.isArray(v)?v:fallback}catch(e){return fallback}
+function readStorage(key,fallback){
+ try{
+  const v=JSON.parse(localStorage.getItem(key));
+  return Array.isArray(v)?v:fallback;
+ }catch(e){return fallback}
 }
 function saveRealData(){
  localStorage.setItem(REAL_POS_KEY,JSON.stringify(realPositions));
- localStorage.setItem(REAL_KEY,JSON.stringify(realHistory.slice(0,50)));
+ localStorage.setItem(REAL_KEY,JSON.stringify(realHistory.slice(0,100)));
 }
-function defaultWallet(){return {cash:100,positions:[],history:[],selectedLeverage:3}}
-function readWallet(){
- try{
-  const w=JSON.parse(localStorage.getItem(KEY));
-  if(!w||typeof w!=='object')return defaultWallet();
-  return {
-   cash:Number.isFinite(Number(w.cash))?Number(w.cash):100,
-   positions:Array.isArray(w.positions)?w.positions:[],
-   history:Array.isArray(w.history)?w.history:[],
-   selectedLeverage:ALLOWED_LEVERAGES.includes(Number(w.selectedLeverage))?Number(w.selectedLeverage):3
-  };
- }catch(e){return defaultWallet()}
+function num(v){
+ const n=Number(v);
+ return Number.isFinite(n)?n:0;
 }
-LEVERAGE=wallet.selectedLeverage;
-wallet.positions.forEach(p=>{
- p.freshPrice=false;
- if(!Number(p.leverage))p.leverage=1;
- if(!Number(p.exposure))p.exposure=Number(p.cost)||10;
- if(!Number(p.highestPrice)||p.highestPrice<Number(p.price))p.highestPrice=Number(p.price)||0;
- if(typeof p.trailingActive!=='boolean')p.trailingActive=false;
-});
-function persist(){localStorage.setItem(KEY,JSON.stringify(wallet))}
-function save(){persist();renderWallet()}
+function usd(v){
+ return '$'+num(v).toLocaleString('en-US',{maximumFractionDigits:0});
+}
+function escapeHtml(s){
+ return String(s??'').replace(/[&<>"']/g,c=>({
+  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+ }[c]));
+}
+function shortAddress(s){
+ return s?String(s).slice(0,5)+'…'+String(s).slice(-5):'';
+}
 function attrs(pool){return pool.attributes||{}}
 
-function getChange(a){
- const c=[a.price_change_percentage?.h24,a.price_change_percentage?.h1,a.price_change_percentage_24h,a.price_change_24h];
- for(const x of c){
-  if(x!==undefined&&x!==null&&Number.isFinite(Number(x)))return Number(x);
- }
- return null;
-}
-
-function getPools(){
- return allPools.map(p=>{
-  const a=attrs(p),rel=p.relationships||{};
-  const token=(rel.base_token?.data?.id||'').split('_').pop();
-  const address=String(p.id||'').split('_').pop();
-  return {
-   id:p.id,address,mint:token,
-   name:a.name||token||p.id,
-   symbol:a.base_token_symbol||'',
-   price:num(a.base_token_price_usd),
-   liq:num(a.reserve_in_usd),
-   vol:num(a.volume_usd?.h24),
-   change:getChange(a),
-   url:'https://www.geckoterminal.com/solana/pools/'+address
-  };
- });
-}
-function passing(){
- const minL=num(document.getElementById('minLiq').value);
- const minV=num(document.getElementById('minVol').value);
- const maxD=num(document.getElementById('maxDrop').value);
- return getPools().filter(p=>p.liq>=minL&&p.vol>=minV&&p.change!==null&&p.change>=-maxD);
-}
-function applyFilters(){renderPools()}
 async function fetchJson(url){
  const controller=new AbortController();
  const timeout=setTimeout(()=>controller.abort(),12000);
@@ -259,201 +186,184 @@ async function fetchJson(url){
   return await response.json();
  }finally{clearTimeout(timeout)}
 }
-function escapeHtml(s){
- return String(s).replace(/[&<>"']/g,c=>({
-  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
- }[c]));
+
+function getChange(a){
+ const values=[
+  a.price_change_percentage?.h24,
+  a.price_change_percentage?.h1,
+  a.price_change_percentage_24h,
+  a.price_change_24h
+ ];
+ for(const x of values){
+  if(x!==undefined&&x!==null&&Number.isFinite(Number(x)))return Number(x);
+ }
+ return null;
 }
+
+function mapPool(p){
+ const a=attrs(p);
+ const rel=p.relationships||{};
+ const mint=(rel.base_token?.data?.id||'').split('_').pop();
+ const address=String(p.id||'').split('_').pop();
+ return {
+  id:p.id,
+  address,
+  mint,
+  name:a.name||a.base_token_symbol||shortAddress(mint),
+  symbol:a.base_token_symbol||'',
+  price:num(a.base_token_price_usd),
+  liq:num(a.reserve_in_usd),
+  vol:num(a.volume_usd?.h24),
+  change:getChange(a),
+  url:'https://www.geckoterminal.com/solana/pools/'+address
+ };
+}
+
+function scorePool(p){
+ const liq=p.liq;
+ const vol=p.vol;
+ const change=p.change??0;
+ const ratio=liq>0?vol/liq:0;
+
+ let score=35;
+ if(liq>=100000)score+=18;
+ else if(liq>=50000)score+=14;
+ else if(liq>=20000)score+=9;
+ else if(liq>=10000)score+=4;
+
+ if(vol>=500000)score+=20;
+ else if(vol>=100000)score+=16;
+ else if(vol>=50000)score+=12;
+ else if(vol>=10000)score+=7;
+ else if(vol>=5000)score+=3;
+
+ if(ratio>=3)score+=12;
+ else if(ratio>=1)score+=9;
+ else if(ratio>=0.5)score+=6;
+ else if(ratio>=0.2)score+=3;
+
+ if(change>0&&change<=20)score+=10;
+ else if(change>20&&change<=50)score+=6;
+ else if(change>50)score-=8;
+ else if(change< -20)score-=15;
+ else if(change<0)score-=5;
+
+ return Math.max(1,Math.min(99,Math.round(score)));
+}
+
+function verdict(p){
+ if(p.liq<10000||p.vol<5000||p.change===null)return 'ÉVITER';
+ if(p.score>=75)return 'À ÉTUDIER';
+ if(p.score>=55)return 'SURVEILLER';
+ return 'PRUDENCE';
+}
+
+function passing(){
+ const minL=num(document.getElementById('minLiq').value);
+ const minV=num(document.getElementById('minVol').value);
+ const maxD=num(document.getElementById('maxDrop').value);
+ return allPools
+  .filter(p=>p.liq>=minL&&p.vol>=minV&&p.change!==null&&p.change>=-maxD)
+  .sort((a,b)=>b.score-a.score);
+}
+
+function applyFilters(){renderPools()}
+
 function renderPools(){
  const list=document.getElementById('poolList');
  const good=passing();
- document.getElementById('received').textContent=allPools.length;
+ document.getElementById('received').textContent=allPools.length+' / '+MAX_POOLS;
  document.getElementById('passed').textContent=good.length;
- if(!allPools.length){list.textContent='Aucune donnée chargée.';return}
- if(!good.length){list.textContent='Aucun pool ne passe actuellement les trois filtres.';return}
- list.innerHTML=good.map(p=>`
- <div class="pool">
- <div class="pooltop"><span class="token">${escapeHtml(p.name)}</span><span class="pill">Pool retenu</span></div>
- <div class="meta">Liquidité ${usd(p.liq)} • Volume 24 h ${usd(p.vol)} • Variation ${p.change.toFixed(2)}% • Prix ${p.price?'$'+p.price:'indisponible'}</div>
- <div class="actions">
- <button onclick="buyPool('${encodeURIComponent(p.id)}')">Acheter 10 € • x${LEVERAGE} (simulation)</button>
- <button class="secondary" onclick="prepareRealBuy('${encodeURIComponent(p.id)}')">Préparer achat réel</button>
- <a href="${p.url}" target="_blank" rel="noopener">Voir le pool</a>
- </div>
- </div>`).join('');
-}
+ document.getElementById('bestScore').textContent=good.length?good[0].score+' %':'—';
 
-function updateLeverageDisplay(){
- document.getElementById('leverageTitle').textContent='x'+LEVERAGE;
- document.getElementById('leverageInfo').textContent='Mise : '+euro(STAKE)+' • Exposition simulée : '+euro(STAKE*LEVERAGE);
- document.getElementById('leverageSelect').value=String(LEVERAGE);
-}
-function changeLeverage(value){
- const n=Number(value);
- if(!ALLOWED_LEVERAGES.includes(n))return;
- LEVERAGE=n;
- wallet.selectedLeverage=n;
- persist();
- updateLeverageDisplay();
- renderPools();
-}
-function buyPool(encodedId){
- const id=decodeURIComponent(encodedId);
- const p=getPools().find(x=>x.id===id);
- if(!p){alert('Pool introuvable. Actualise les données.');return}
- if(!(p.price>0)){alert('Prix USD indisponible.');return}
- if(wallet.cash<STAKE){alert('Solde virtuel insuffisant.');return}
- const exposure=STAKE*LEVERAGE;
- wallet.cash-=STAKE;
- wallet.positions.push({
-  id:p.id,name:p.name,symbol:p.symbol,price:p.price,lastPrice:p.price,lastPriceAt:null,
-  priceStatus:'prix initial de simulation',leverage:LEVERAGE,exposure,qty:exposure/p.price,
-  cost:STAKE,url:p.url,freshPrice:false,highestPrice:p.price,trailingActive:false,trailingStop:0
- });
- wallet.history.unshift({type:'Achat fictif x'+LEVERAGE,name:p.name,amount:STAKE,date:new Date().toLocaleString('fr-FR')});
- save();
- alert('Achat simulé enregistré.\nMise : 10 €\nLevier : x'+LEVERAGE+'\nExposition : '+euro(exposure));
-}
-function latestPrice(pos){return Number(pos.lastPrice)>0?Number(pos.lastPrice):0}
-function positionPnl(pos,current){
- if(!current||!pos.price)return 0;
- return Number(pos.cost)*(Number(pos.leverage)||1)*(current/pos.price-1);
-}
-function positionEquity(pos,current){return Math.max(0,Number(pos.cost)+positionPnl(pos,current))}
-function setDiagnostic(message){document.getElementById('priceDiagnostics').textContent=message}
+ if(!allPools.length){
+  list.textContent='Aucune donnée chargée.';
+  return;
+ }
+ if(!good.length){
+  list.textContent='Aucun pool ne passe les filtres actuels.';
+  return;
+ }
 
-async function refreshPositionPrices(){
- if(!wallet.positions.length){setDiagnostic('Aucune position ouverte à actualiser.');return}
- let updated=0,failed=0,details=[];
- const now=new Date().toISOString();
- for(const pos of wallet.positions){
-  pos.freshPrice=false;
-  const address=String(pos.id||'').split('_').pop();
-  if(!address){pos.priceStatus='adresse du pool absente';failed++;continue}
-  try{
-   const url='https://api.geckoterminal.com/api/v2/networks/solana/pools/'+encodeURIComponent(address);
-   const j=await fetchJson(url);
-   const value=num(j?.data?.attributes?.base_token_price_usd);
-   if(value>0){
-    pos.lastPrice=value;pos.lastPriceAt=now;pos.priceStatus='nouveau cours reçu';pos.freshPrice=true;
-    if(!Number(pos.highestPrice)||value>Number(pos.highestPrice))pos.highestPrice=value;
-    const gain=(value/Number(pos.price)-1)*100;
-    if(gain>=TRAIL_ACTIVATION)pos.trailingActive=true;
-    if(pos.trailingActive)pos.trailingStop=Number(pos.highestPrice)*(1-TRAIL_DISTANCE/100);
-    updated++;details.push(pos.name+': OK');
-   }else{pos.priceStatus='prix absent';failed++;details.push(pos.name+': prix absent')}
-  }catch(e){
-   pos.priceStatus=e.name==='AbortError'?'délai dépassé':'échec réseau';
-   failed++;details.push(pos.name+': '+pos.priceStatus);
-  }
- }
- persist();
- setDiagnostic(updated+' cours reçu(s) • '+failed+' échec(s) • '+details.join(' | '));
-}
-function closePosition(i,reason){
- const p=wallet.positions[i];if(!p)return false;
- const current=latestPrice(p),pnl=positionPnl(p,current),proceeds=Math.max(0,p.cost+pnl);
- wallet.cash+=proceeds;
- wallet.history.unshift({type:reason,name:p.name,amount:proceeds,date:new Date().toLocaleString('fr-FR')});
- wallet.positions.splice(i,1);return true;
-}
-function checkAutoExits(){
- let changed=false;
- for(let i=wallet.positions.length-1;i>=0;i--){
-  const p=wallet.positions[i],current=latestPrice(p);
-  if(!p.freshPrice||!current||!p.price)continue;
-  const pct=(current-p.price)/p.price*100;let reason='';
-  if(p.trailingActive&&Number(p.trailingStop)>0&&current<=Number(p.trailingStop))reason='Trailing stop automatique fictif';
-  else if(pct>=20)reason='Vente automatique fictive +20 %';
-  else if(pct<=-10)reason='Protection automatique fictive -10 %';
-  if(reason){closePosition(i,reason);changed=true}
- }
- if(changed)persist();
-}
-function sell(i){
- const p=wallet.positions[i];if(!p)return;
- if(!p.freshPrice){alert('Aucun nouveau cours reçu. Vente suspendue.');return}
- closePosition(i,'Vente fictive manuelle');save();
-}
-function renderWallet(){
- document.getElementById('cash').textContent=euro(wallet.cash);
- let val=0,unknown=false;
- wallet.positions.forEach(p=>{
-  const price=latestPrice(p);
-  if(price>0)val+=positionEquity(p,price);else unknown=true;
- });
- document.getElementById('positions').textContent=unknown?'Prix actuel indisponible':euro(val);
- document.getElementById('total').textContent=unknown?'Estimation partielle : '+euro(wallet.cash+val):euro(wallet.cash+val);
- const pl=document.getElementById('positionList');
- pl.innerHTML=wallet.positions.length?wallet.positions.map((p,i)=>{
-  const current=latestPrice(p),hasPrice=current>0,pnl=hasPrice?positionPnl(p,current):0;
-  const equity=hasPrice?positionEquity(p,current):0,pct=hasPrice&&p.price>0?(current/p.price-1)*100:0;
-  const leverage=Number(p.leverage)||1,exposure=Number(p.exposure)||Number(p.cost)*leverage;
-  const resultPct=hasPrice&&p.cost>0?pnl/p.cost*100:0;
-  const high=Number(p.highestPrice)||Number(p.price)||0,stop=Number(p.trailingStop)||0;
-  const trailingText=p.trailingActive?'ACTIF • Stop : $'+(stop>0?stop.toPrecision(7):'en attente')+' • Plus haut : $'+high.toPrecision(7):'En attente de +'+TRAIL_ACTIVATION+' %';
-  const state=!hasPrice?'Cours indisponible':!p.freshPrice?'Dernier cours connu — non vérifié':p.trailingActive?'Trailing stop actif':pct>=10?'Alerte gain +10 %':pct<=-10?'Seuil de protection atteint':'Suivi en cours';
-  const updatedAt=p.lastPriceAt?new Date(p.lastPriceAt).toLocaleString('fr-FR'):'Pas encore actualisé';
-  return `<div class="pool">
-  <strong>${escapeHtml(p.name||'Position')}</strong>
-  <div class="meta"><span class="leverage">LEVIER x${leverage}</span> • Mise : ${euro(p.cost)} • Exposition : ${euro(exposure)}</div>
-  <div class="meta">Valeur estimée : ${hasPrice?euro(equity):'indisponible'} • Résultat : ${hasPrice?euro(pnl)+' ('+(resultPct>=0?'+':'')+resultPct.toFixed(2)+' % sur la mise)':'indisponible'}</div>
-  <div class="meta">Variation du token : ${hasPrice?pct.toFixed(2)+'%':'indisponible'} • ${state}</div>
-  <div class="meta">Trailing stop : ${escapeHtml(trailingText)}</div>
-  <div class="meta">Dernier cours reçu : ${escapeHtml(updatedAt)} • Diagnostic : ${escapeHtml(p.priceStatus||'en attente')}</div>
-  <button class="sell" onclick="sell(${i})" ${p.freshPrice?'':'disabled'}>Vendre en simulation</button>
+ list.innerHTML=good.map(p=>{
+  const opinion=verdict(p);
+  const color=p.score>=75?'good':p.score>=55?'purple':'bad';
+  const change=p.change===null?'indisponible':(p.change>0?'+':'')+p.change.toFixed(2)+' %';
+  return `
+  <div class="pool">
+   <div class="pooltop">
+    <span class="token">${escapeHtml(p.name)} ${p.symbol?'('+escapeHtml(p.symbol)+')':''}</span>
+    <span class="pill">${opinion}</span>
+   </div>
+   <div class="meta">Score du setup : <span class="score ${color}">${p.score} / 100</span></div>
+   <div class="meta">Liquidité : ${usd(p.liq)} • Volume 24 h : ${usd(p.vol)}</div>
+   <div class="meta">Variation 24 h : ${change} • Prix : ${p.price?'$'+p.price:'indisponible'}</div>
+   <div class="meta">Analyse : ${analysisText(p)}</div>
+   <div class="actions">
+    <button onclick="prepareRealBuy('${encodeURIComponent(p.id)}')">Acheter avec Phantom</button>
+    <a href="${p.url}" target="_blank" rel="noopener">Voir le pool</a>
+   </div>
   </div>`;
- }).join(''):'Aucune position ouverte.';
- const h=document.getElementById('history');
- h.innerHTML=wallet.history.length?wallet.history.slice(0,30).map(x=>`
- <div class="pool"><strong>${escapeHtml(x.type)} — ${escapeHtml(x.name)}</strong>
- <div class="meta">${euro(x.amount)} • ${escapeHtml(x.date)}</div></div>`).join(''):'Aucune opération.';
-}
-function resetWallet(){
- if(!confirm('Effacer le portefeuille virtuel et son historique ?'))return;
- wallet=defaultWallet();LEVERAGE=3;persist();updateLeverageDisplay();renderWallet();renderPools();
- setDiagnostic('Portefeuille virtuel réinitialisé.');
+ }).join('');
 }
 
-/* ==========================
-   PHANTOM + JUPITER TRADING
-   ========================== */
+function analysisText(p){
+ const reasons=[];
+ if(p.liq>=50000)reasons.push('liquidité intéressante');
+ else reasons.push('liquidité limitée');
+ if(p.vol>=50000)reasons.push('volume actif');
+ else reasons.push('volume modéré');
+ if(p.change>0&&p.change<=30)reasons.push('momentum positif');
+ else if(p.change>30)reasons.push('hausse déjà importante');
+ else reasons.push('momentum faible ou négatif');
+ return reasons.join(' • ')+'.';
+}
 
 function getPhantom(){
- return window.phantom?.solana || (window.solana?.isPhantom?window.solana:null);
+ return window.phantom?.solana||(window.solana?.isPhantom?window.solana:null);
 }
 function realStatus(message){
  document.getElementById('phantomStatus').textContent=message;
 }
 function renderRealLock(){
  document.getElementById('realLockStatus').textContent=liveUnlocked?
-  'MODE RÉEL DÉVERROUILLÉ — les ordres restent manuels et nécessitent une signature Phantom.':
-  'Mode réel verrouillé. Aucun ordre réel ne peut être préparé.';
+ 'MODE RÉEL DÉVERROUILLÉ — chaque transaction nécessite une signature Phantom.':
+ 'Mode réel verrouillé.';
 }
 async function connectPhantom(){
  try{
   const provider=getPhantom();
-  if(!provider){realStatus('Phantom introuvable. Ouvre CART3R depuis le navigateur intégré de Phantom.');return}
+  if(!provider){
+   realStatus('Phantom introuvable. Ouvre CART3R depuis le navigateur intégré de Phantom.');
+   return;
+  }
   phantomProvider=provider;
   const response=await provider.connect();
   phantomAddress=response?.publicKey?.toString()||provider.publicKey?.toString();
   if(!phantomAddress)throw new Error('Adresse du portefeuille non reçue.');
   realStatus('Connecté : '+phantomAddress);
   renderRealPositions();
- }catch(e){realStatus('Connexion impossible : '+(e.message||e))}
+ }catch(e){
+  realStatus('Connexion impossible : '+(e.message||e));
+ }
 }
 async function disconnectPhantom(){
  try{if(phantomProvider?.disconnect)await phantomProvider.disconnect()}catch(e){}
- phantomProvider=null;phantomAddress=null;liveUnlocked=false;pendingTrade=null;
+ phantomProvider=null;
+ phantomAddress=null;
+ liveUnlocked=false;
+ pendingTrade=null;
  document.getElementById('signTradeBtn').disabled=true;
  document.getElementById('pendingTrade').textContent='Aucun ordre en attente.';
- realStatus('Portefeuille déconnecté.');renderRealLock();
+ realStatus('Portefeuille déconnecté.');
+ renderRealLock();
+ renderRealPositions();
 }
 function unlockRealMode(){
  if(!phantomAddress){alert('Connecte d’abord Phantom.');return}
- const ok=confirm('Tu vas déverrouiller les fonctions de trading réel. Une transaction signée peut entraîner une perte définitive de tes fonds. Continuer ?');
- if(!ok)return;
- liveUnlocked=true;renderRealLock();
+ if(!confirm('Activer le trading réel ? Une transaction signée peut entraîner une perte définitive de tes fonds.'))return;
+ liveUnlocked=true;
+ renderRealLock();
 }
 function cancelPendingTrade(){
  pendingTrade=null;
@@ -477,7 +387,7 @@ async function rpc(method,params){
   headers:{'Content-Type':'application/json'},
   body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})
  });
- if(!response.ok)throw new Error('Erreur RPC : HTTP '+response.status);
+ if(!response.ok)throw new Error('Erreur RPC HTTP '+response.status);
  const data=await response.json();
  if(data.error)throw new Error(data.error.message||'Erreur RPC');
  return data.result;
@@ -486,212 +396,449 @@ async function jupiterOrder(inputMint,outputMint,amount){
  const wait=Math.max(0,2200-(Date.now()-lastJupiterOrderAt));
  if(wait)await new Promise(resolve=>setTimeout(resolve,wait));
  lastJupiterOrderAt=Date.now();
+
  const params=new URLSearchParams({
-  inputMint,outputMint,amount:String(amount),taker:phantomAddress,
+  inputMint,
+  outputMint,
+  amount:String(amount),
+  taker:phantomAddress,
   maxSupportedTransactionVersion:'0'
  });
- const response=await fetch(JUP+'/order?'+params.toString(),{headers:{accept:'application/json'}});
+ const response=await fetch(JUP+'/order?'+params.toString(),{
+  headers:{accept:'application/json'}
+ });
  const data=await response.json();
  if(!response.ok)throw new Error(data.error||data.errorMessage||('Jupiter HTTP '+response.status));
- if(!data.transaction)throw new Error(data.errorMessage||'Jupiter ne peut pas construire cet ordre. Vérifie le solde et la liquidité.');
+ if(!data.transaction)throw new Error(data.errorMessage||'Jupiter ne peut pas construire cet ordre.');
  if(!data.requestId)throw new Error('Identifiant d’ordre Jupiter manquant.');
  return data;
 }
+
 async function prepareRealBuy(encodedId){
- if(!liveUnlocked){alert('Le mode réel est verrouillé. Connecte Phantom puis déverrouille le mode réel.');return}
+ if(!liveUnlocked){alert('Connecte Phantom et déverrouille le mode réel.');return}
  if(realBusy)return;
- const p=getPools().find(x=>x.id===decodeURIComponent(encodedId));
- if(!p||!p.mint){alert('Adresse du jeton introuvable pour ce pool.');return}
+
+ const p=allPools.find(x=>x.id===decodeURIComponent(encodedId));
+ if(!p||!p.mint){alert('Adresse du jeton introuvable.');return}
+ if(!(p.price>0)){alert('Prix du jeton indisponible. Achat suspendu.');return}
+ if(realPositions.some(x=>x.mint===p.mint)){
+  alert('Cette position est déjà suivie dans CART3R.');
+  return;
+ }
+
  const amountSol=Number(document.getElementById('realAmount').value);
- if(!Number.isFinite(amountSol)||amountSol<=0){alert('Montant SOL invalide.');return}
- if(amountSol<0.001){alert('Pour cette interface, utilise au moins 0,001 SOL.');return}
- if(!window.solanaWeb3?.VersionedTransaction){alert('Bibliothèque Solana indisponible. Recharge la page.');return}
+ if(!Number.isFinite(amountSol)||amountSol<0.001){
+  alert('Montant invalide. Minimum de cette interface : 0,001 SOL.');
+  return;
+ }
+ if(!window.solanaWeb3?.VersionedTransaction){
+  alert('Bibliothèque Solana indisponible. Recharge la page.');
+  return;
+ }
+
  realBusy=true;
  document.getElementById('pendingTrade').textContent='Préparation de l’achat auprès de Jupiter…';
  document.getElementById('signTradeBtn').disabled=true;
+
  try{
-  const lamports=Math.round(amountSol*1e9);
-  const order=await jupiterOrder(SOL_MINT,p.mint,lamports);
+  const order=await jupiterOrder(SOL_MINT,p.mint,Math.round(amountSol*1e9));
   const supply=await rpc('getTokenSupply',[p.mint]);
   const decimals=Number(supply?.value?.decimals??0);
-  const output=(Number(order.outAmount)/Math.pow(10,decimals));
+  const output=Number(order.outAmount)/Math.pow(10,decimals);
+
   pendingTrade={
-   type:'buy',mint:p.mint,name:p.name||p.symbol||p.mint,
-   symbol:p.symbol||'',order,amountSol,output,decimals
+   type:'buy',
+   mint:p.mint,
+   name:p.name||p.symbol||p.mint,
+   symbol:p.symbol||'',
+   order,
+   amountSol,
+   output,
+   decimals,
+   entryPrice:p.price,
+   poolId:p.address
   };
+
   document.getElementById('pendingTrade').textContent=
    'ACHAT À CONFIRMER — '+pendingTrade.name+
    ' • Dépense : '+amountSol+' SOL • Sortie estimée : '+
    output.toLocaleString('fr-FR',{maximumFractionDigits:8})+
-   ' '+(p.symbol||'unités')+
-   ' • Route : '+(order.router||'Jupiter')+
-   '. Vérifie les détails dans Phantom avant de signer.';
+   ' '+(p.symbol||'jetons')+
+   ' • Prix de référence : $'+p.price+
+   '. Vérifie la transaction dans Phantom.';
   document.getElementById('signTradeBtn').disabled=false;
  }catch(e){
   pendingTrade=null;
   document.getElementById('pendingTrade').textContent='Erreur de préparation : '+(e.message||e);
- }finally{realBusy=false}
+ }finally{
+  realBusy=false;
+ }
 }
+
 async function getTokenBalance(mint){
- const result=await rpc('getTokenAccountsByOwner',[phantomAddress,{mint},{encoding:'jsonParsed'}]);
- let total=0;
+ const result=await rpc('getTokenAccountsByOwner',[
+  phantomAddress,{mint},{encoding:'jsonParsed'}
+ ]);
+ let total=0n;
  for(const item of (result?.value||[])){
   const amount=item?.account?.data?.parsed?.info?.tokenAmount?.amount;
   if(amount)total+=BigInt(amount);
  }
  return total.toString();
 }
-async function prepareRealSell(mint,encodedName){
- if(!liveUnlocked){alert('Le mode réel est verrouillé.');return}
- if(realBusy)return;
- if(!phantomAddress){alert('Connecte Phantom.');return}
+
+async function prepareRealSell(mint,encodedName,automatic=false){
+ if(!liveUnlocked){
+  if(!automatic)alert('Le mode réel est verrouillé.');
+  return;
+ }
+ if(!phantomAddress||realBusy)return;
+
+ const position=realPositions.find(x=>x.mint===mint);
+ if(!position){
+  document.getElementById('pendingTrade').textContent='Position introuvable.';
+  return;
+ }
+
  realBusy=true;
- document.getElementById('pendingTrade').textContent='Lecture du solde du jeton…';
+ document.getElementById('pendingTrade').textContent=automatic?
+ 'Seuil atteint : préparation automatique de la vente…':
+ 'Lecture du solde du jeton…';
  document.getElementById('signTradeBtn').disabled=true;
+
  try{
   const rawAmount=await getTokenBalance(mint);
   if(BigInt(rawAmount)<=0n)throw new Error('Aucun solde disponible pour ce jeton.');
+
   const order=await jupiterOrder(mint,SOL_MINT,rawAmount);
-  const name=decodeURIComponent(encodedName||mint);
+  const name=decodeURIComponent(encodedName||position.name||mint);
   const solEstimate=Number(order.outAmount)/1e9;
-  pendingTrade={type:'sell',mint,name,order,rawAmount,solEstimate};
+
+  pendingTrade={
+   type:'sell',
+   mint,
+   name,
+   order,
+   rawAmount,
+   solEstimate,
+   automatic
+  };
+
   document.getElementById('pendingTrade').textContent=
-   'VENTE À CONFIRMER — '+name+
-   ' • Quantité brute : '+rawAmount+
-   ' • Sortie estimée : '+solEstimate.toFixed(6)+' SOL'+
-   ' • Route : '+(order.router||'Jupiter')+
-   '. Tu vas vendre le solde entier détecté. Vérifie dans Phantom avant de signer.';
+   (automatic?'SEUIL ATTEINT — VENTE PRÉPARÉE AUTOMATIQUEMENT. ':'VENTE À CONFIRMER — ')+
+   name+' • Sortie estimée : '+solEstimate.toFixed(6)+' SOL'+
+   ' • Solde entier détecté. Signe uniquement après vérification dans Phantom.';
   document.getElementById('signTradeBtn').disabled=false;
  }catch(e){
-  pendingTrade=null;
-  document.getElementById('pendingTrade').textContent='Erreur de préparation : '+(e.message||e);
- }finally{realBusy=false}
+  position.autoPending=false;
+  saveRealData();
+  document.getElementById('pendingTrade').textContent=
+   'Préparation de vente impossible : '+(e.message||e)+
+   '. La position reste suivie et pourra être réessayée.';
+ }finally{
+  realBusy=false;
+  renderRealPositions();
+ }
 }
+
 async function signAndExecuteTrade(){
  if(!liveUnlocked||!phantomAddress||!pendingTrade||realBusy)return;
+
  const provider=getPhantom();
  if(!provider){alert('Phantom introuvable.');return}
  if(!window.solanaWeb3?.VersionedTransaction){alert('Bibliothèque Solana indisponible.');return}
+
  realBusy=true;
  document.getElementById('signTradeBtn').disabled=true;
  document.getElementById('pendingTrade').textContent='Ouverture de la demande de signature Phantom…';
+
  try{
   const currentAddress=provider.publicKey?.toString();
-  if(currentAddress&&currentAddress!==phantomAddress)throw new Error('Le compte Phantom a changé. Reconnecte le bon compte.');
-  const transaction=window.solanaWeb3.VersionedTransaction.deserialize(fromBase64(pendingTrade.order.transaction));
-  if(typeof provider.signTransaction!=='function')throw new Error('Cette version de Phantom ne propose pas la signature de transaction requise.');
+  if(currentAddress&&currentAddress!==phantomAddress){
+   throw new Error('Le compte Phantom a changé. Reconnecte le bon compte.');
+  }
+
+  const trade=pendingTrade;
+  const transaction=window.solanaWeb3.VersionedTransaction.deserialize(
+   fromBase64(trade.order.transaction)
+  );
+
+  if(typeof provider.signTransaction!=='function'){
+   throw new Error('Cette version de Phantom ne propose pas la signature requise.');
+  }
+
   const signed=await provider.signTransaction(transaction);
   const signedTransaction=toBase64(signed.serialize());
-  document.getElementById('pendingTrade').textContent='Transaction signée. Envoi à Jupiter pour exécution…';
+
+  document.getElementById('pendingTrade').textContent='Transaction signée. Envoi à Jupiter…';
+
   const response=await fetch(JUP+'/execute',{
    method:'POST',
    headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({signedTransaction,requestId:pendingTrade.order.requestId})
+   body:JSON.stringify({
+    signedTransaction,
+    requestId:trade.order.requestId
+   })
   });
   const result=await response.json();
-  if(!response.ok)throw new Error(result.error||result.errorMessage||'Erreur d’exécution Jupiter.');
-  if(result.status!=='Success')throw new Error(result.error||('Transaction non confirmée. Code : '+result.code));
-  const trade=pendingTrade;
+
+  if(!response.ok)throw new Error(result.error||result.errorMessage||'Erreur Jupiter.');
+  if(result.status!=='Success'){
+   throw new Error(result.error||('Transaction non confirmée : '+result.code));
+  }
+
   const signature=result.signature||'';
   const record={
    type:trade.type==='buy'?'ACHAT RÉEL':'VENTE RÉELLE',
-   name:trade.name,mint:trade.mint,signature,
+   name:trade.name,
+   mint:trade.mint,
+   signature,
    date:new Date().toLocaleString('fr-FR'),
    amount:trade.type==='buy'?trade.amountSol:trade.solEstimate
   };
+
   realHistory.unshift(record);
+
   if(trade.type==='buy'){
-   if(!realPositions.some(x=>x.mint===trade.mint)){
-    realPositions.unshift({mint:trade.mint,name:trade.name,symbol:trade.symbol||'',date:record.date});
-   }
+   realPositions.unshift({
+    mint:trade.mint,
+    name:trade.name,
+    symbol:trade.symbol||'',
+    date:record.date,
+    poolId:trade.poolId||'',
+    entryPrice:trade.entryPrice||0,
+    stopLoss:DEFAULT_SL,
+    takeProfit:DEFAULT_TP,
+    lastPrice:trade.entryPrice||0,
+    lastPriceAt:null,
+    priceStatus:'prix de référence avant achat',
+    autoPending:false
+   });
   }else{
    realPositions=realPositions.filter(x=>x.mint!==trade.mint);
   }
-  saveRealData();
+
   pendingTrade=null;
+  saveRealData();
+
   document.getElementById('pendingTrade').innerHTML=
-   'Transaction confirmée par Jupiter. <a href="https://solscan.io/tx/'+encodeURIComponent(signature)+'" target="_blank" rel="noopener">Voir sur Solscan</a>';
+   'Transaction confirmée par Jupiter. <a href="https://solscan.io/tx/'+
+   encodeURIComponent(signature)+'" target="_blank" rel="noopener">Voir sur Solscan</a>';
+
   realStatus('Connecté : '+phantomAddress);
-  renderRealPositions();renderRealHistory();
+  renderRealPositions();
+  renderRealHistory();
+
  }catch(e){
-  document.getElementById('pendingTrade').textContent='Transaction non confirmée : '+(e.message||e)+'. Vérifie Phantom et ton historique avant de réessayer.';
+  document.getElementById('pendingTrade').textContent=
+   'Transaction non confirmée : '+(e.message||e)+
+   '. Vérifie Phantom et ton historique avant de réessayer.';
  }finally{
   realBusy=false;
   document.getElementById('signTradeBtn').disabled=!pendingTrade;
  }
 }
-async function renderRealPositions(){
- const el=document.getElementById('realPositions');
- if(!realPositions.length){el.textContent='Aucune position réelle suivie.';return}
- if(!phantomAddress){
-  el.innerHTML=realPositions.map(p=>`<div class="pool"><strong>${escapeHtml(p.name)}</strong><div class="meta">${escapeHtml(p.mint)}</div></div>`).join('');
-  return;
+
+function updateRisk(mint,field,value){
+ const p=realPositions.find(x=>x.mint===mint);
+ if(!p)return;
+ const n=Number(value);
+ if(!Number.isFinite(n))return;
+
+ if(field==='stopLoss'){
+  p.stopLoss=Math.max(-99,Math.min(-0.1,n));
  }
- el.innerHTML='Lecture des soldes sur Solana…';
- const items=[];
- for(const p of realPositions){
-  try{
-   const raw=await getTokenBalance(p.mint);
-   const supply=await rpc('getTokenSupply',[p.mint]);
-   const decimals=Number(supply?.value?.decimals??0);
-   const amount=Number(raw)/Math.pow(10,decimals);
-   items.push(`<div class="pool"><strong>${escapeHtml(p.name)}</strong>
-    <div class="meta">Solde détecté : ${amount.toLocaleString('fr-FR',{maximumFractionDigits:8})} • Mint : ${escapeHtml(p.mint)}</div>
-    <button class="sell" onclick="prepareRealSell('${encodeURIComponent(p.mint)}','${encodeURIComponent(p.name)}')">Préparer la vente réelle (tout)</button></div>`);
-  }catch(e){
-   items.push(`<div class="pool"><strong>${escapeHtml(p.name)}</strong><div class="meta">Solde non lisible : ${escapeHtml(e.message||e)}</div></div>`);
-  }
+ if(field==='takeProfit'){
+  p.takeProfit=Math.max(0.1,Math.min(10000,n));
  }
- el.innerHTML=items.join('');
-}
-function renderRealHistory(){
- const el=document.getElementById('realHistory');
- if(!realHistory.length){el.textContent='Aucune transaction enregistrée.';return}
- el.innerHTML=realHistory.slice(0,30).map(x=>`
- <div class="pool"><strong>${escapeHtml(x.type)} — ${escapeHtml(x.name)}</strong>
- <div class="meta">${escapeHtml(x.date)} • ${escapeHtml(x.mint||'')}</div>
- ${x.signature?'<div class="meta"><a href="https://solscan.io/tx/'+encodeURIComponent(x.signature)+'" target="_blank" rel="noopener">Voir la transaction sur Solscan</a></div>':''}
- </div>`).join('');
+ saveRealData();
+ renderRealPositions();
 }
 
-/* ACTUALISATION AUTOMATIQUE SANS CHEVAUCHEMENT */
+function renderRealPositions(){
+ const el=document.getElementById('realPositions');
+ if(!realPositions.length){
+  el.textContent='Aucune position réelle suivie.';
+  return;
+ }
+
+ el.innerHTML=realPositions.map(p=>{
+  const entry=num(p.entryPrice);
+  const current=num(p.lastPrice);
+  const pct=entry>0&&current>0?(current/entry-1)*100:null;
+  const state=p.autoPending?'VENTE EN PRÉPARATION':
+   p.priceStatus||'En attente de cours';
+
+  return `
+  <div class="pool">
+   <strong>${escapeHtml(p.name||'Position')}</strong>
+   <div class="meta">Mint : ${escapeHtml(p.mint)}</div>
+   <div class="meta">Prix de référence avant achat : ${entry?'$'+entry:'indisponible'}</div>
+   <div class="meta">Dernier cours reçu : ${current?'$'+current:'indisponible'} • Variation indicative : ${pct===null?'indisponible':(pct>=0?'+':'')+pct.toFixed(2)+' %'}</div>
+   <div class="meta">Diagnostic : ${escapeHtml(state)}</div>
+   <div class="position-controls">
+    <div>
+     <label>Stop-loss (%)</label>
+     <input type="number" step="0.5" value="${num(p.stopLoss??DEFAULT_SL)}"
+      onchange="updateRisk('${encodeURIComponent(p.mint)}','stopLoss',this.value)">
+    </div>
+    <div>
+     <label>Take-profit (%)</label>
+     <input type="number" step="0.5" value="${num(p.takeProfit??DEFAULT_TP)}"
+      onchange="updateRisk('${encodeURIComponent(p.mint)}','takeProfit',this.value)">
+    </div>
+   </div>
+   <div class="meta">Seuil SL : ${num(p.stopLoss??DEFAULT_SL)} % • Seuil TP : +${num(p.takeProfit??DEFAULT_TP)} %</div>
+   <button class="sell" onclick="prepareRealSell('${encodeURIComponent(p.mint)}','${encodeURIComponent(p.name||p.mint)}')">Préparer la vente réelle (tout)</button>
+  </div>`;
+ }).join('');
+}
+
+function renderRealHistory(){
+ const el=document.getElementById('realHistory');
+ if(!realHistory.length){
+  el.textContent='Aucune transaction enregistrée.';
+  return;
+ }
+ el.innerHTML=realHistory.slice(0,50).map(x=>`
+  <div class="pool">
+   <strong>${escapeHtml(x.type)} — ${escapeHtml(x.name)}</strong>
+   <div class="meta">${escapeHtml(x.date)} • ${escapeHtml(x.mint||'')}</div>
+   ${x.signature?'<div class="meta"><a href="https://solscan.io/tx/'+encodeURIComponent(x.signature)+'" target="_blank" rel="noopener">Voir sur Solscan</a></div>':''}
+  </div>`).join('');
+}
+
+/* SURVEILLANCE DES POSITIONS RÉELLES */
+async function monitorRealPositions(){
+ if(positionBusy||document.hidden||!phantomAddress||!realPositions.length)return;
+ positionBusy=true;
+
+ try{
+  for(const p of [...realPositions]){
+   if(!p.poolId||p.autoPending)continue;
+
+   try{
+    const url='https://api.geckoterminal.com/api/v2/networks/solana/pools/'+encodeURIComponent(p.poolId);
+    const j=await fetchJson(url);
+    const price=num(j?.data?.attributes?.base_token_price_usd);
+
+    if(!(price>0)){
+     p.priceStatus='prix indisponible';
+     continue;
+    }
+
+    p.lastPrice=price;
+    p.lastPriceAt=new Date().toISOString();
+    p.priceStatus='nouveau cours reçu';
+
+    const entry=num(p.entryPrice);
+    if(!(entry>0))continue;
+
+    const change=(price/entry-1)*100;
+    const sl=num(p.stopLoss??DEFAULT_SL);
+    const tp=num(p.takeProfit??DEFAULT_TP);
+
+    if(change<=sl||change>=tp){
+     p.autoPending=true;
+     saveRealData();
+     renderRealPositions();
+
+     await prepareRealSell(
+      p.mint,
+      encodeURIComponent(p.name||p.mint),
+      true
+     );
+     break;
+    }
+   }catch(e){
+    p.priceStatus=e.name==='AbortError'?'délai dépassé':'échec réseau';
+   }
+  }
+  saveRealData();
+  renderRealPositions();
+ }finally{
+  positionBusy=false;
+ }
+}
+
+/* COLLECTE PROGRESSIVE DE 5 PAGES DE 20 POOLS */
+function rebuildPools(){
+ const merged=new Map();
+ for(let page=1;page<=5;page++){
+  for(const p of (poolPages[page]||[])){
+   if(p?.id)merged.set(p.id,mapPool(p));
+  }
+ }
+ allPools=[...merged.values()].slice(0,MAX_POOLS);
+ allPools.forEach(p=>p.score=scorePool(p));
+ renderPools();
+}
+
+async function fetchPoolPage(page){
+ const url=API+'&page='+page;
+ const j=await fetchJson(url);
+ if(!Array.isArray(j.data))throw new Error('Réponse GeckoTerminal invalide.');
+ poolPages[page]=j.data;
+ rebuildPools();
+ return j.data.length;
+}
+
 async function refreshCycle(){
  if(loading||document.hidden)return;
  loading=true;
  const status=document.getElementById('status');
+ const diagnostics=document.getElementById('diagnostics');
+
  try{
-  status.textContent='Actualisation en cours…';
-  const j=await fetchJson(API);
-  allPools=Array.isArray(j.data)?j.data:[];
-  renderPools();
-  await refreshPositionPrices();
-  checkAutoExits();
-  renderWallet();
-  const time=new Date().toLocaleTimeString('fr-FR');
-  status.textContent='Dernière actualisation : '+time+' • '+allPools.length+' pools reçus • Prochaine vérification dans 5 secondes.';
+  status.textContent='Actualisation de la page '+pageNumber+'/5…';
+  const count=await fetchPoolPage(pageNumber);
+
+  diagnostics.textContent=
+   'Page '+pageNumber+' reçue : '+count+
+   ' pools • Total unique chargé : '+allPools.length+
+   ' • Actualisation progressive toutes les 5 secondes.';
+
+  await monitorRealPositions();
+
+  const now=new Date().toLocaleTimeString('fr-FR');
+  status.textContent='Dernière actualisation : '+now+
+   ' • '+allPools.length+' pools chargés • Page '+pageNumber+'/5';
+
+  pageNumber=pageNumber>=5?1:pageNumber+1;
+
  }catch(e){
-  status.textContent='Erreur : '+e.message+' • Nouvelle tentative dans 5 secondes.';
+  status.textContent='Erreur réseau : '+(e.message||e)+
+   ' • Nouvelle tentative dans 5 secondes.';
+  diagnostics.textContent='Le scanner conserve les dernières données reçues. '+(e.message||e);
  }finally{
   loading=false;
   clearTimeout(timer);
   timer=setTimeout(refreshCycle,REFRESH_MS);
  }
 }
+
 function loadPools(){
  if(loading)return;
  clearTimeout(timer);
  refreshCycle();
 }
+
 document.addEventListener('visibilitychange',()=>{
- if(!document.hidden){clearTimeout(timer);refreshCycle()}
+ if(!document.hidden){
+  clearTimeout(timer);
+  refreshCycle();
+ }
 });
 
-updateLeverageDisplay();
-renderWallet();
+window.addEventListener('beforeunload',()=>{
+ clearTimeout(timer);
+});
+
 renderRealLock();
-renderRealHistory();
 renderRealPositions();
+renderRealHistory();
 refreshCycle();
 </script>
 </body>
 </html>
+
