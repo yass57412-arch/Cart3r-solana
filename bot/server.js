@@ -1,2076 +1,776 @@
-
 "use strict";
+
+/**
+ * CART3R.JAILBREAK — Helius on-chain scanner (TEST ONLY)
+ * - No GeckoTerminal, no Pump.fun feed, no wallet signing, no transactions sent.
+ * - Uses standard Helius logsSubscribe WebSockets (one mention subscription per DEX program).
+ * - Fetches confirmed swap transactions and derives observed wallet token deltas.
+ * - Uses Jupiter Swap V2 order quotes only to test a small buy -> sell round trip.
+ *
+ * Important: activity/volume below is ONLY what this process has observed since it started.
+ * Exact pool reserves/liquidity are deliberately not fabricated; liquidity is null.
+ */
 
 const express = require("express");
 const app = express();
-
 app.use(express.json({ limit: "100kb" }));
 
-const PORT = process.env.PORT || 3000;
-
-const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL || "";
-const JUPITER_API_KEY = process.env.JUPITER_API_KEY || "";
+const PORT = Number(process.env.PORT || 3000);
+const HELIUS_RPC_URL = String(process.env.HELIUS_RPC_URL || "").trim();
+const JUPITER_API_KEY = String(process.env.JUPITER_API_KEY || "").trim();
 
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
-
+const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
-const GECKO_BASE = "https://api.geckoterminal.com/api/v2";
-
-const CONFIG = {
-  MAX_POOLS: 100,
-  MAX_CATALOG_POOLS: 300,
-  CATALOG_TTL_MS: 3600000,
-
-  // GECKOTERMINAL
-  GECKO_REQUEST_GAP_MS: 65000,
-  GECKO_CACHE_MS: 240000,
-  GECKO_STALE_MAX_MS: 3600000,
-  GECKO_COOLDOWN_MS: 120000,
-  GECKO_MAX_COOLDOWN_MS: 1800000,
-
-  // JUPITER
-  MAX_JUPITER_CHECKS: 3,
-  JUPITER_REQUEST_GAP_MS: 2000,
-  JUPITER_COOLDOWN_MS: 120000,
-  SOL_PRICE_CACHE_MS: 300000,
-
-  // SCANNER
-  SCAN_INTERVAL: 300000,
-  REQUEST_TIMEOUT: 20000,
-
-  // FILTRES
-  MIN_LIQUIDITY_USD: 5000,
-  MIN_VOLUME_1H_USD: 1000,
-  MIN_AGE_MINUTES: 5,
-  MIN_TRANSACTIONS_1H: 5,
-  MIN_SCORE: 45,
-  MIN_BUY_RATIO: 50,
-  MAX_VOLUME_LIQUIDITY_RATIO: 10,
-
-  // SIMULATION
-  TEST_TRADE_USD: 10,
-  MAX_JUPITER_IMPACT_PCT: 5
-};
-
-// --------------------------------------------------
-// FLUX GECKOTERMINAL
-// Un seul flux interrogé par scan.
-// --------------------------------------------------
-
-const GECKO_FEEDS = [
-  {
-    name: "new_1",
-    url: GECKO_BASE +
-      "/networks/solana/new_pools?page=1&include=base_token,quote_token,dex"
-  },
-  {
-    name: "new_2",
-    url: GECKO_BASE +
-      "/networks/solana/new_pools?page=2&include=base_token,quote_token,dex"
-  },
-  {
-    name: "trending_1",
-    url: GECKO_BASE +
-      "/networks/solana/trending_pools?page=1&duration=1h&include=base_token,quote_token,dex"
-  },
-  {
-    name: "trending_2",
-    url: GECKO_BASE +
-      "/networks/solana/trending_pools?page=2&duration=1h&include=base_token,quote_token,dex"
-  },
-  {
-    name: "volume_1",
-    url: GECKO_BASE +
-      "/networks/solana/pools?page=1&sort=h24_volume_usd_desc&include=base_token,quote_token,dex"
-  }
+// Official mainnet program addresses. We listen for actual transactions, not market-indexer data.
+const DEX_PROGRAMS = [
+  { name: "Raydium AMM v4", id: "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8" },
+  { name: "Raydium CPMM", id: "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C" },
+  { name: "Raydium CLMM", id: "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK" },
+  { name: "Raydium LaunchLab", id: "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj" },
+  { name: "Orca Whirlpools", id: "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc" },
+  { name: "Meteora DLMM", id: "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo" }
 ];
 
-// --------------------------------------------------
-// VARIABLES
-// --------------------------------------------------
+const CONFIG = {
+  maxCandidates: 100,
+  windowMs: 15 * 60 * 1000,
+  checkEveryMs: 45 * 1000,
+  checkBatch: 8,
+  minSwaps: 5,
+  minBuyers: 2,
+  minBuyPressure: 0.55,
+  maxRoundTripLossPct: 8,
+  buyTestLamports: "10000000", // 0.01 SOL — quote only, no order execution
+  maxSeenSignatures: 5000,
+  rpcTimeoutMs: 12000,
+  jupiterTimeoutMs: 12000
+};
 
-let running = true;
-let scanning = false;
-let scannerState = "STARTING";
-
-let pools = [];
-let lastUpdate = null;
-let lastError = null;
-
-let geckoCooldownUntil = 0;
-let jupiterCooldownUntil = 0;
-
-let geckoLastRequestAt = 0;
-let geckoLastCheck = null;
-let geckoLastError = null;
-let geckoCallsCount = 0;
-let geckoSuccessCount = 0;
-let geckoFailureCount = 0;
-let geckoBackoffLevel = 0;
-let geckoFeedIndex = 0;
-let geckoCurrentFeed = null;
-let geckoInFlight = null;
-
-let jupiterLastCheck = null;
-let jupiterLastError = null;
-let jupiterLastSolPriceUsd = null;
-let jupiterChecksCount = 0;
-let jupiterSuccessCount = 0;
-let jupiterRequestAt = 0;
-let jupiterQueue = Promise.resolve();
-
-let solPriceCached = null;
-let solPriceFetchedAt = 0;
-
-let scanTimer = null;
-let heliusTimer = null;
-let countdownTimer = null;
-
-let nextScanAt = Date.now();
-let nextScanInSeconds = 0;
-
-let heliusLastSlot = null;
-let heliusLastCheck = null;
-let heliusError = null;
-
-const geckoCache = new Map();
-const poolCatalog = new Map();
-const snapshots = new Map();
-
-// --------------------------------------------------
-// OUTILS
-// --------------------------------------------------
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function num(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function round(value, decimals = 2) {
-  const p = Math.pow(10, decimals);
-  return Math.round(num(value) * p) / p;
-}
-
-function shorten(value) {
-  if (!value || typeof value !== "string") return "";
-  return value.slice(0, 6) + "..." + value.slice(-4);
-}
-
-function isGeckoCooldown() {
-  return Date.now() < geckoCooldownUntil;
-}
-
-function isJupiterCooldown() {
-  return Date.now() < jupiterCooldownUntil;
-}
-
-function retryAfterMs(response, fallback) {
-  const value = response.headers.get("retry-after");
-
-  if (!value) return fallback;
-
-  const seconds = Number(value);
-
-  if (Number.isFinite(seconds) && seconds > 0) {
-    return Math.max(1000, seconds * 1000);
+const state = {
+  running: true,
+  mode: "TEST",
+  realTrading: false,
+  scanner: "STARTING",
+  pools: new Map(),
+  seenSignatures: new Set(),
+  signatureQueue: [],
+  processing: 0,
+  ws: null,
+  wsReconnectTimer: null,
+  checkTimer: null,
+  lastUpdate: null,
+  lastError: null,
+  scanning: false,
+  nextScanInSeconds: 0,
+  startedAt: new Date().toISOString(),
+  helius: {
+    configured: Boolean(HELIUS_RPC_URL),
+    connected: false,
+    subscriptions: 0,
+    lastCheck: null,
+    lastSlot: null,
+    lastError: null,
+    transactionsSeen: 0,
+    swapsDecoded: 0,
+    reconnects: 0
+  },
+  jupiter: {
+    configured: Boolean(JUPITER_API_KEY),
+    api: "SWAP_V2_ORDER",
+    lastCheck: null,
+    lastSolPriceUsd: null,
+    checksCount: 0,
+    successCount: 0,
+    cooldownSeconds: 0,
+    lastError: null
+  },
+  discovery: {
+    provider: "HELIUS_LOGS_WEBSOCKET",
+    feeds: DEX_PROGRAMS.length,
+    currentFeed: null,
+    callsCount: 0,
+    successCount: 0,
+    failureCount: 0,
+    lastCheck: null,
+    lastError: null
+  },
+  protections: {
+    mintAuthorityCheck: true,
+    freezeAuthorityCheck: true,
+    tokenProgramCheck: true,
+    token2022ExtensionInspection: false,
+    liquidityCheck: false,
+    observedSwapActivityCheck: true,
+    buyPressureCheck: true,
+    scoreCheck: true,
+    buyQuoteCheck: true,
+    sellQuoteCheck: true,
+    sellabilitySimulation: false,
+    realTrading: false
   }
+};
 
-  const date = Date.parse(value);
+const now = () => Date.now();
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const toNum = v => Number.isFinite(Number(v)) ? Number(v) : 0;
+const round = (n, d = 2) => Number.isFinite(n) ? Number(n.toFixed(d)) : null;
+const safeError = e => String(e && e.message ? e.message : e).slice(0, 350);
 
-  if (Number.isFinite(date)) {
-    return Math.max(1000, date - Date.now());
+function rpcWebSocketUrl() {
+  if (!HELIUS_RPC_URL) return null;
+  try {
+    const u = new URL(HELIUS_RPC_URL);
+    u.protocol = "wss:";
+    // Helius standard mainnet RPC URLs work as the matching websocket endpoint.
+    if (!u.hostname.includes("helius")) {
+      const key = u.searchParams.get("api-key");
+      const fallback = new URL("wss://mainnet.helius-rpc.com/");
+      if (key) fallback.searchParams.set("api-key", key);
+      return fallback.toString();
+    }
+    return u.toString();
+  } catch (_) {
+    return null;
   }
-
-  return fallback;
 }
 
-function setGeckoCooldown(ms) {
-  geckoCooldownUntil = Math.max(
-    geckoCooldownUntil,
-    Date.now() + ms
-  );
-}
-
-function setJupiterCooldown(ms = CONFIG.JUPITER_COOLDOWN_MS) {
-  jupiterCooldownUntil = Math.max(
-    jupiterCooldownUntil,
-    Date.now() + ms
-  );
-}
-
-// --------------------------------------------------
-// REQUÊTES HTTP
-// --------------------------------------------------
-
-async function httpJson(url, options = {}, timeoutMs = CONFIG.REQUEST_TIMEOUT) {
+async function fetchJson(url, options = {}, timeoutMs = CONFIG.rpcTimeoutMs) {
   const controller = new AbortController();
-
-  const timeout = setTimeout(
-    () => controller.abort(),
-    timeoutMs
-  );
-
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      const error = new Error("HTTP " + response.status);
-
-      error.status = response.status;
-      error.retryAfterMs = retryAfterMs(response, 60000);
-
-      throw error;
-    }
-
-    return await response.json();
-
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const body = await response.text();
+    let json;
+    try { json = body ? JSON.parse(body) : {}; }
+    catch (_) { throw new Error("Réponse JSON invalide (HTTP " + response.status + ")"); }
+    if (!response.ok) throw new Error("HTTP " + response.status + ": " + (json.error?.message || body.slice(0, 160)));
+    return json;
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timer);
   }
 }
 
-// --------------------------------------------------
-// GECKOTERMINAL
-// --------------------------------------------------
-
-function geckoBackoffMs() {
-  const delays = [
-    120000,
-    300000,
-    600000,
-    1200000,
-    CONFIG.GECKO_MAX_COOLDOWN_MS
-  ];
-
-  return delays[
-    Math.min(geckoBackoffLevel, delays.length - 1)
-  ];
+async function heliusRpc(method, params) {
+  if (!HELIUS_RPC_URL) throw new Error("HELIUS_RPC_URL non configurée");
+  const json = await fetchJson(HELIUS_RPC_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: Date.now(), method, params })
+  });
+  if (json.error) throw new Error(json.error.message || "Erreur RPC Helius");
+  return json.result;
 }
 
-async function geckoRequest(feed) {
-  if (geckoInFlight) {
-    return geckoInFlight;
+function mintBalanceMap(rows) {
+  const map = new Map();
+  for (const row of rows || []) {
+    if (!row || !row.mint || !row.owner) continue;
+    const amount = row.uiTokenAmount && row.uiTokenAmount.uiAmount != null
+      ? Number(row.uiTokenAmount.uiAmount)
+      : Number(row.uiTokenAmount?.amount || 0) / Math.pow(10, Number(row.uiTokenAmount?.decimals || 0));
+    const key = row.owner + "|" + row.mint;
+    map.set(key, (map.get(key) || 0) + (Number.isFinite(amount) ? amount : 0));
   }
-
-  const cached = geckoCache.get(feed.name);
-
-  if (
-    cached &&
-    Date.now() - cached.time < CONFIG.GECKO_CACHE_MS
-  ) {
-    return cached.data;
-  }
-
-  if (isGeckoCooldown()) {
-    if (
-      cached &&
-      Date.now() - cached.time < CONFIG.GECKO_STALE_MAX_MS
-    ) {
-      return cached.data;
-    }
-
-    throw new Error("GeckoTerminal en pause");
-  }
-
-  geckoInFlight = (async () => {
-    const wait = Math.max(
-      0,
-      CONFIG.GECKO_REQUEST_GAP_MS -
-        (Date.now() - geckoLastRequestAt)
-    );
-
-    if (wait > 0) await sleep(wait);
-
-    if (isGeckoCooldown()) {
-      throw new Error("GeckoTerminal en pause");
-    }
-
-    geckoLastRequestAt = Date.now();
-    geckoLastCheck = new Date().toISOString();
-    geckoCurrentFeed = feed.name;
-    geckoCallsCount++;
-
-    try {
-      const data = await httpJson(
-        feed.url,
-        {
-          headers: {
-            Accept: "application/json;version=20230302"
-          }
-        }
-      );
-
-      if (!data || !Array.isArray(data.data)) {
-        throw new Error("Format GeckoTerminal invalide");
-      }
-
-      if (data.data.length > 0) {
-        geckoCache.set(feed.name, {
-          data,
-          time: Date.now()
-        });
-      }
-
-      geckoBackoffLevel = 0;
-      geckoLastError = null;
-      geckoSuccessCount++;
-
-      return data;
-
-    } catch (error) {
-      geckoFailureCount++;
-
-      if (error.status === 429) {
-        const pause = error.retryAfterMs ||
-          geckoBackoffMs();
-
-        setGeckoCooldown(pause);
-        geckoBackoffLevel++;
-
-        geckoLastError = "GeckoTerminal HTTP 429";
-      } else {
-        geckoLastError = error.message;
-      }
-
-      if (
-        cached &&
-        Date.now() - cached.time < CONFIG.GECKO_STALE_MAX_MS
-      ) {
-        return cached.data;
-      }
-
-      throw error;
-    }
-  })();
-
-  try {
-    return await geckoInFlight;
-  } finally {
-    geckoInFlight = null;
-  }
+  return map;
 }
 
-// --------------------------------------------------
-// NORMALISATION GECKOTERMINAL
-// --------------------------------------------------
-
-function relationshipAddress(relationship) {
-  const id =
-    relationship &&
-    relationship.data &&
-    relationship.data.id;
-
-  if (!id) return null;
-
-  const separator = id.indexOf("_");
-
-  return separator >= 0
-    ? id.slice(separator + 1)
-    : id;
+function accountKeyObjects(tx) {
+  const keys = tx?.transaction?.message?.accountKeys || [];
+  const header = tx?.transaction?.message?.header || {};
+  const required = Number(header.numRequiredSignatures || 0);
+  return keys.map((k, i) => {
+    if (typeof k === "string") return { pubkey: k, signer: i < required, index: i };
+    return { pubkey: k.pubkey, signer: Boolean(k.signer) || i < required, index: i };
+  });
 }
 
-function normalizeGeckoResponse(response) {
-  const included = new Map();
+function findSwapForSigner(tx) {
+  const meta = tx?.meta;
+  if (!meta || meta.err) return null;
+  const keys = accountKeyObjects(tx);
+  const signers = keys.filter(k => k.signer && k.pubkey);
+  if (!signers.length) return null;
+  const pre = mintBalanceMap(meta.preTokenBalances);
+  const post = mintBalanceMap(meta.postTokenBalances);
+  const allKeys = new Set([...pre.keys(), ...post.keys()]);
+  const solMintSet = new Set([SOL_MINT, USDC_MINT, USDT_MINT]);
+  let best = null;
 
-  for (const item of response.included || []) {
-    if (item.type === "token" && item.attributes) {
-      const address =
-        item.attributes.address ||
-        relationshipAddress({
-          data: { id: item.id }
-        });
-
-      if (address) {
-        included.set(address, {
-          address,
-          name: item.attributes.name || "Token Solana",
-          symbol: item.attributes.symbol || "UNKNOWN",
-          decimals: item.attributes.decimals
-        });
-      }
+  for (const signer of signers) {
+    const deltas = [];
+    for (const key of allKeys) {
+      const split = key.split("|");
+      if (split[0] !== signer.pubkey) continue;
+      const mint = split.slice(1).join("|");
+      const delta = (post.get(key) || 0) - (pre.get(key) || 0);
+      if (Math.abs(delta) > 0) deltas.push({ mint, delta });
     }
-  }
+    const tokenChanges = deltas.filter(x => !solMintSet.has(x.mint));
+    if (!tokenChanges.length) continue;
 
-  const normalized = [];
-
-  const quoteMints = new Set([
-    SOL_MINT,
-    USDC_MINT,
-    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
-  ]);
-
-  for (const item of response.data || []) {
-    if (!item.attributes) continue;
-
-    const a = item.attributes;
-    const rel = item.relationships || {};
-
-    const baseAddress =
-      relationshipAddress(rel.base_token);
-
-    const quoteAddress =
-      relationshipAddress(rel.quote_token);
-
-    if (!baseAddress || !quoteAddress) continue;
-
-    const baseInfo = included.get(baseAddress) || {
-      address: baseAddress,
-      name: "Token Solana",
-      symbol: "UNKNOWN"
-    };
-
-    const quoteInfo = included.get(quoteAddress) || {
-      address: quoteAddress,
-      name: "Token Solana",
-      symbol: "UNKNOWN"
-    };
-
-    let token = baseInfo;
-    let otherToken = quoteInfo;
-    let tokenPrice = num(a.base_token_price_usd);
-
-    if (
-      quoteMints.has(baseAddress) &&
-      !quoteMints.has(quoteAddress)
-    ) {
-      token = quoteInfo;
-      otherToken = baseInfo;
-      tokenPrice = num(a.quote_token_price_usd);
+    const account = meta.preBalances && meta.postBalances ? signer.index : -1;
+    let solDelta = 0;
+    if (account >= 0 && meta.preBalances[account] != null && meta.postBalances[account] != null) {
+      solDelta = (Number(meta.postBalances[account]) - Number(meta.preBalances[account])) / 1e9;
     }
-
-    if (!token.address || quoteMints.has(token.address)) {
-      continue;
-    }
-
-    const createdAt = a.pool_created_at
-      ? Date.parse(a.pool_created_at)
-      : 0;
-
-    const tx = a.transactions || {};
-    const vol = a.volume_usd || {};
-    const changes = a.price_change_percentage || {};
-
-    const dexRelationship =
-      rel.dex &&
-      rel.dex.data &&
-      rel.dex.data.id;
-
-    const poolAddress = a.address;
-
-    if (!poolAddress) continue;
-
-    normalized.push({
-      chainId: "solana",
-
-      address: token.address,
-      pairAddress: poolAddress,
-
-      baseToken: token,
-      quoteToken: otherToken,
-
-      dexId: dexRelationship || "geckoterminal",
-
-      name: token.name,
-      symbol: token.symbol,
-
-      priceUsd: tokenPrice,
-
-      liquidity: {
-        usd: num(a.reserve_in_usd)
-      },
-
-      volume: {
-        m5: num(vol.m5),
-        h1: num(vol.h1),
-        h24: num(vol.h24)
-      },
-
-      txns: {
-        m5: tx.m5 || {},
-        h1: tx.h1 || {},
-        h24: tx.h24 || {}
-      },
-
-      priceChange: {
-        m5: num(changes.m5),
-        h1: num(changes.h1),
-        h24: num(changes.h24)
-      },
-
-      pairCreatedAt: Number.isFinite(createdAt)
-        ? createdAt
-        : 0,
-
-      url:
-        "https://www.geckoterminal.com/solana/pools/" +
-        poolAddress
-    });
-  }
-
-  return normalized;
-}
-
-// --------------------------------------------------
-// CATALOGUE CUMULATIF DES POOLS
-// --------------------------------------------------
-
-function updatePoolCatalog(pairs) {
-  const now = Date.now();
-
-  for (const pair of pairs) {
-    const key = pair.pairAddress;
-
-    if (!key) continue;
-
-    const previous = poolCatalog.get(key);
-
-    const currentLiquidity = num(
-      pair.liquidity && pair.liquidity.usd
-    );
-
-    const previousLiquidity = previous
-      ? num(previous.pair.liquidity && previous.pair.liquidity.usd)
-      : 0;
-
-    // On conserve la meilleure paire connue pour ce pool.
-    if (
-      !previous ||
-      currentLiquidity >= previousLiquidity
-    ) {
-      poolCatalog.set(key, {
-        pair,
-        updatedAt: now
-      });
+    const stableChange = deltas.find(x => x.mint === USDC_MINT || x.mint === USDT_MINT);
+    const wrappedSolChange = deltas.find(x => x.mint === SOL_MINT);
+    let quoteDeltaUsd = 0;
+    let quoteKind = "SOL";
+    if (stableChange) {
+      quoteDeltaUsd = stableChange.delta;
+      quoteKind = "USD_STABLE";
+    } else if (wrappedSolChange) {
+      quoteDeltaUsd = wrappedSolChange.delta;
+      quoteKind = "SOL";
     } else {
-      previous.updatedAt = now;
+      quoteDeltaUsd = solDelta;
+      quoteKind = "SOL";
     }
-  }
+    if (Math.abs(quoteDeltaUsd) < (quoteKind === "SOL" ? 0.00005 : 0.01)) continue;
 
-  for (const [key, value] of poolCatalog.entries()) {
-    if (now - value.updatedAt > CONFIG.CATALOG_TTL_MS) {
-      poolCatalog.delete(key);
-    }
-  }
-
-  // Protection contre une croissance illimitée.
-  if (poolCatalog.size > CONFIG.MAX_CATALOG_POOLS) {
-    const sorted = Array.from(poolCatalog.entries())
-      .sort((a, b) => b[1].updatedAt - a[1].updatedAt);
-
-    poolCatalog.clear();
-
-    for (const [key, value] of sorted.slice(
-      0,
-      CONFIG.MAX_CATALOG_POOLS
-    )) {
-      poolCatalog.set(key, value);
-    }
-  }
-}
-
-function getCatalogPairs() {
-  const grouped = new Map();
-
-  for (const value of poolCatalog.values()) {
-    const pair = value.pair;
-
-    if (!pair || !pair.address) continue;
-
-    const previous = grouped.get(pair.address);
-
-    if (
-      !previous ||
-      num(pair.liquidity && pair.liquidity.usd) >
-        num(previous.liquidity && previous.liquidity.usd)
-    ) {
-      grouped.set(pair.address, pair);
-    }
-  }
-
-  return Array.from(grouped.values());
-}
-
-async function discoverPools() {
-  const feed = GECKO_FEEDS[
-    geckoFeedIndex % GECKO_FEEDS.length
-  ];
-
-  geckoFeedIndex =
-    (geckoFeedIndex + 1) % GECKO_FEEDS.length;
-
-  try {
-    const response = await geckoRequest(feed);
-    const normalized = normalizeGeckoResponse(response);
-
-    updatePoolCatalog(normalized);
-
-    geckoLastError = null;
-
-  } catch (error) {
-    geckoLastError =
-      feed.name + ": " + error.message;
-  }
-
-  const catalogPairs = getCatalogPairs();
-
-  if (!catalogPairs.length) {
-    throw new Error(
-      geckoLastError || "Aucun pool disponible"
-    );
-  }
-
-  return catalogPairs;
-}
-
-// --------------------------------------------------
-// HELIUS
-// --------------------------------------------------
-
-async function heliusRequest(method, params = []) {
-  if (!HELIUS_RPC_URL) {
-    throw new Error("HELIUS_RPC_URL non configurée");
-  }
-
-  const data = await httpJson(
-    HELIUS_RPC_URL,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method,
-        params
-      })
-    }
-  );
-
-  if (data.error) {
-    throw new Error(
-      data.error.message || "Erreur Helius"
-    );
-  }
-
-  return data.result;
-}
-
-async function checkHelius() {
-  try {
-    const slot = await heliusRequest("getSlot", [
-      { commitment: "confirmed" }
-    ]);
-
-    heliusLastSlot = slot;
-    heliusLastCheck = new Date().toISOString();
-    heliusError = null;
-
-    return true;
-
-  } catch (error) {
-    heliusError = error.message;
-    return false;
-  }
-}
-
-// --------------------------------------------------
-// EXTENSIONS TOKEN-2022
-// --------------------------------------------------
-
-const DANGEROUS_TOKEN2022_EXTENSIONS = new Set([
-  1,  // TransferFeeConfig
-  3,  // MintCloseAuthority
-  4,  // ConfidentialTransferMint
-  6,  // DefaultAccountState
-  9,  // NonTransferable
-  12, // PermanentDelegate
-  14, // TransferHook
-  16, // ConfidentialTransferFeeConfig
-  25  // PausableConfig, si présent dans la version du programme
-]);
-
-function inspectToken2022Extensions(data) {
-  if (data.length <= 82) {
-    return {
-      checked: true,
-      extensions: [],
-      dangerous: []
-    };
-  }
-
-  // Les comptes mint Token-2022 avec extensions
-  // utilisent une zone de padding puis un type de compte.
-  if (data.length < 166 || data.readUInt8(165) !== 1) {
-    return {
-      checked: false,
-      extensions: [],
-      dangerous: [],
-      error: "Format d'extensions non reconnu"
-    };
-  }
-
-  let offset = 166;
-  const extensions = [];
-  const dangerous = [];
-
-  while (offset + 4 <= data.length) {
-    const type = data.readUInt16LE(offset);
-    const length = data.readUInt16LE(offset + 2);
-
-    offset += 4;
-
-    if (type === 0 && length === 0) break;
-
-    if (offset + length > data.length) {
-      return {
-        checked: false,
-        extensions,
-        dangerous,
-        error: "TLV Token-2022 invalide"
+    for (const token of tokenChanges) {
+      // Buy: wallet receives token while spending SOL/stablecoin. Sell: inverse.
+      const direction = token.delta > 0 && quoteDeltaUsd < 0 ? "BUY"
+        : token.delta < 0 && quoteDeltaUsd > 0 ? "SELL" : null;
+      if (!direction) continue;
+      const candidate = {
+        mint: token.mint,
+        direction,
+        tokenAmount: Math.abs(token.delta),
+        quoteAmount: Math.abs(quoteDeltaUsd),
+        quoteKind,
+        trader: signer.pubkey,
+        solDelta
       };
+      if (!best || candidate.tokenAmount > best.tokenAmount) best = candidate;
     }
-
-    extensions.push(type);
-
-    if (DANGEROUS_TOKEN2022_EXTENSIONS.has(type)) {
-      dangerous.push(type);
-    }
-
-    offset += length;
   }
+  return best;
+}
 
+function getOrCreateCandidate(mint, dexName) {
+  let p = state.pools.get(mint);
+  if (!p) {
+    if (state.pools.size >= CONFIG.maxCandidates) {
+      const sorted = [...state.pools.values()].sort((a, b) => (a.lastSwapAt || 0) - (b.lastSwapAt || 0));
+      const removable = sorted.find(x => !x.eligible);
+      if (removable) state.pools.delete(removable.mint);
+      else return null;
+    }
+    p = {
+      address: mint,
+      mint,
+      poolAddress: null,
+      name: "Token " + mint.slice(0, 6) + "…" + mint.slice(-4),
+      symbol: mint.slice(0, 5).toUpperCase(),
+      dex: dexName,
+      liquidity: null,
+      liquidityVerified: false,
+      volume: 0,
+      volumeUsd: null,
+      volumeSol: 0,
+      price: null,
+      created: new Date().toISOString(),
+      firstSeenAt: now(),
+      lastSwapAt: 0,
+      swaps: [],
+      buyers: new Set(),
+      buyCount: 0,
+      sellCount: 0,
+      buyVolumeSol: 0,
+      sellVolumeSol: 0,
+      buyVolumeUsd: 0,
+      sellVolumeUsd: 0,
+      buyPressure: 0,
+      score: 0,
+      eligible: false,
+      risks: ["Analyse en cours"],
+      security: { checked: false },
+      quotes: { buyOk: false, sellOk: false },
+      lastCheckAt: 0,
+      checkError: null
+    };
+    state.pools.set(mint, p);
+  }
+  if (dexName && !String(p.dex).includes(dexName)) p.dex = String(p.dex).split(", ").concat(dexName).join(", ");
+  return p;
+}
+
+function addSwap(mint, swap, dexName, signature, slot) {
+  const p = getOrCreateCandidate(mint, dexName);
+  if (!p) return;
+  const ts = now();
+  const solAmount = swap.quoteKind === "SOL" ? swap.quoteAmount : 0;
+  const usdAmount = swap.quoteKind === "USD_STABLE" ? swap.quoteAmount : null;
+  p.swaps.push({ ts, direction: swap.direction, trader: swap.trader, solAmount, usdAmount, signature, slot });
+  p.swaps = p.swaps.filter(x => ts - x.ts <= CONFIG.windowMs);
+  p.lastSwapAt = ts;
+  if (swap.direction === "BUY") p.buyers.add(swap.trader);
+  p.buyCount = p.swaps.filter(x => x.direction === "BUY").length;
+  p.sellCount = p.swaps.filter(x => x.direction === "SELL").length;
+  p.buyVolumeSol = p.swaps.filter(x => x.direction === "BUY").reduce((s, x) => s + x.solAmount, 0);
+  p.sellVolumeSol = p.swaps.filter(x => x.direction === "SELL").reduce((s, x) => s + x.solAmount, 0);
+  p.buyVolumeUsd = p.swaps.filter(x => x.direction === "BUY").reduce((s, x) => s + (x.usdAmount || 0), 0);
+  p.sellVolumeUsd = p.swaps.filter(x => x.direction === "SELL").reduce((s, x) => s + (x.usdAmount || 0), 0);
+  const total = p.buyCount + p.sellCount;
+  p.buyPressure = total ? p.buyCount / total : 0;
+  p.volumeSol = p.buyVolumeSol + p.sellVolumeSol;
+  p.volumeUsd = p.buyVolumeUsd + p.sellVolumeUsd || null;
+  p.volume = p.volumeUsd || p.volumeSol;
+  state.lastUpdate = new Date().toISOString();
+  state.helius.swapsDecoded++;
+}
+
+async function enrichCandidate(p) {
+  try {
+    const asset = await heliusRpc("getAsset", { id: p.mint });
+    const metadata = asset?.content?.metadata || {};
+    if (metadata.name) p.name = String(metadata.name).slice(0, 80);
+    if (metadata.symbol) p.symbol = String(metadata.symbol).slice(0, 20);
+    if (asset?.token_info?.decimals != null) p.decimals = Number(asset.token_info.decimals);
+  } catch (_) {
+    // Metadata is optional; the mint remains the reliable identifier.
+  }
+}
+
+async function inspectMint(mint) {
+  const info = await heliusRpc("getAccountInfo", [mint, { encoding: "jsonParsed", commitment: "confirmed" }]);
+  const value = info && info.value;
+  if (!value || !value.owner) throw new Error("Compte mint introuvable");
+  const owner = value.owner;
+  const parsed = value.data && value.data.parsed && value.data.parsed.info;
+  if (!parsed) throw new Error("Données mint non décodées");
+  const risks = [];
+  if (owner !== TOKEN_PROGRAM && owner !== TOKEN_2022_PROGRAM) risks.push("Programme de token non reconnu");
+  if (parsed.isInitialized === false) risks.push("Mint non initialisé");
+  if (parsed.mintAuthority) risks.push("Mint authority encore active");
+  if (parsed.freezeAuthority) risks.push("Freeze authority encore active");
+  // Do not claim to inspect Token-2022 extensions from jsonParsed mint data.
+  // For safety, Token-2022 mints are excluded until every extension is explicitly decoded.
+  if (owner === TOKEN_2022_PROGRAM) risks.push("Token-2022 bloqué : extensions non vérifiées par ce scanner");
   return {
     checked: true,
-    extensions,
-    dangerous
+    owner,
+    tokenProgram: owner === TOKEN_PROGRAM ? "SPL_TOKEN" : owner === TOKEN_2022_PROGRAM ? "TOKEN_2022" : "UNKNOWN",
+    decimals: Number(parsed.decimals),
+    supply: String(parsed.supply || "0"),
+    mintAuthority: parsed.mintAuthority || null,
+    freezeAuthority: parsed.freezeAuthority || null,
+    risks
   };
 }
-
-// --------------------------------------------------
-// SÉCURITÉ DES MINTS
-// --------------------------------------------------
-
-async function checkMintAuthorities(addresses) {
-  const results = new Map();
-
-  if (!HELIUS_RPC_URL || !addresses.length) {
-    for (const address of addresses) {
-      results.set(address, {
-        checked: false,
-        error: "Helius indisponible"
-      });
-    }
-
-    return results;
-  }
-
-  for (let offset = 0; offset < addresses.length; offset += 100) {
-    const group = addresses.slice(offset, offset + 100);
-
-    try {
-      const response = await heliusRequest(
-        "getMultipleAccounts",
-        [
-          group,
-          {
-            encoding: "base64",
-            commitment: "confirmed"
-          }
-        ]
-      );
-
-      const accounts = response && response.value
-        ? response.value
-        : [];
-
-      group.forEach((address, index) => {
-        const account = accounts[index];
-
-        if (!account || !account.data || !account.data[0]) {
-          results.set(address, {
-            checked: false,
-            error: "Compte mint introuvable"
-          });
-          return;
-        }
-
-        try {
-          const owner = account.owner;
-
-          if (
-            owner !== TOKEN_PROGRAM &&
-            owner !== TOKEN_2022_PROGRAM
-          ) {
-            throw new Error("Programme Token non reconnu");
-          }
-
-          const data = Buffer.from(
-            account.data[0],
-            "base64"
-          );
-
-          if (data.length < 82) {
-            throw new Error("Données mint invalides");
-          }
-
-          const mintAuthorityOption =
-            data.readUInt32LE(0);
-
-          const freezeAuthorityOption =
-            data.readUInt32LE(46);
-
-          const initialized =
-            data.readUInt8(45) === 1;
-
-          const token2022 =
-            owner === TOKEN_2022_PROGRAM;
-
-          const extensionInfo = token2022
-            ? inspectToken2022Extensions(data)
-            : {
-                checked: true,
-                extensions: [],
-                dangerous: []
-              };
-
-          results.set(address, {
-            checked: true,
-            owner,
-            token2022,
-
-            extensionsChecked: extensionInfo.checked,
-            extensions: extensionInfo.extensions,
-            dangerousExtensions: extensionInfo.dangerous,
-            extensionError: extensionInfo.error || null,
-
-            initialized,
-
-            mintAuthorityActive:
-              mintAuthorityOption !== 0,
-
-            freezeAuthorityActive:
-              freezeAuthorityOption !== 0,
-
-            decimals: data.readUInt8(44),
-
-            supply: data.readBigUInt64LE(36).toString()
-          });
-
-        } catch (error) {
-          results.set(address, {
-            checked: false,
-            error: error.message
-          });
-        }
-      });
-
-    } catch (error) {
-      heliusError = error.message;
-
-      for (const address of group) {
-        results.set(address, {
-          checked: false,
-          error: error.message
-        });
-      }
-    }
-  }
-
-  return results;
-}
-
-// --------------------------------------------------
-// FILE D'ATTENTE JUPITER
-// --------------------------------------------------
-
-async function waitForJupiterSlot() {
-  const task = jupiterQueue.then(async () => {
-    if (isJupiterCooldown()) {
-      const error = new Error("Jupiter en pause");
-      error.status = 429;
-      throw error;
-    }
-
-    const wait = Math.max(
-      0,
-      CONFIG.JUPITER_REQUEST_GAP_MS -
-        (Date.now() - jupiterRequestAt)
-    );
-
-    if (wait > 0) await sleep(wait);
-
-    if (isJupiterCooldown()) {
-      const error = new Error("Jupiter en pause");
-      error.status = 429;
-      throw error;
-    }
-
-    jupiterRequestAt = Date.now();
-  });
-
-  jupiterQueue = task.catch(() => {});
-
-  await task;
-}
-
-// --------------------------------------------------
-// JUPITER V2
-// --------------------------------------------------
 
 async function jupiterOrder(inputMint, outputMint, amount) {
-  if (!JUPITER_API_KEY) {
-    throw new Error("JUPITER_API_KEY non configurée");
-  }
-
-  await waitForJupiterSlot();
-
-  const params = new URLSearchParams({
-    inputMint,
-    outputMint,
-    amount: String(amount)
-  });
-
-  const controller = new AbortController();
-
-  const timeout = setTimeout(
-    () => controller.abort(),
-    CONFIG.REQUEST_TIMEOUT
-  );
-
-  try {
-    const response = await fetch(
-      "https://api.jup.ag/swap/v2/order?" + params,
-      {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "x-api-key": JUPITER_API_KEY
-        },
-        signal: controller.signal
-      }
-    );
-
-    const body = await response.text();
-
-    let data;
-
-    try {
-      data = JSON.parse(body);
-    } catch {
-      throw new Error("Réponse Jupiter invalide");
-    }
-
-    if (response.status === 429) {
-      const pause = retryAfterMs(
-        response,
-        CONFIG.JUPITER_COOLDOWN_MS
-      );
-
-      setJupiterCooldown(pause);
-
-      const error = new Error("Jupiter HTTP 429");
-      error.status = 429;
-      error.retryAfterMs = pause;
-
-      jupiterLastError = error.message;
-
-      throw error;
-    }
-
-    if (!response.ok) {
-      const error = new Error(
-        data.errorMessage ||
-        data.error ||
-        "Jupiter HTTP " + response.status
-      );
-
-      error.status = response.status;
-      throw error;
-    }
-
-    if (data.errorCode || data.errorMessage) {
-      throw new Error(
-        data.errorMessage || "Erreur Jupiter"
-      );
-    }
-
-    if (
-      !data.outAmount ||
-      BigInt(data.outAmount) <= 0n
-    ) {
-      throw new Error("Quantité de sortie invalide");
-    }
-
-    jupiterLastCheck = new Date().toISOString();
-
-    return data;
-
-  } finally {
-    clearTimeout(timeout);
-  }
+  if (!JUPITER_API_KEY) throw new Error("JUPITER_API_KEY non configurée");
+  const url = new URL("https://api.jup.ag/swap/v2/order");
+  url.searchParams.set("inputMint", inputMint);
+  url.searchParams.set("outputMint", outputMint);
+  url.searchParams.set("amount", String(amount));
+  const json = await fetchJson(url.toString(), {
+    method: "GET",
+    headers: { "accept": "application/json", "x-api-key": JUPITER_API_KEY }
+  }, CONFIG.jupiterTimeoutMs);
+  if (!json || !json.outAmount || Number(json.outAmount) <= 0) throw new Error("Jupiter ne retourne aucun montant de sortie");
+  return json;
 }
 
-// --------------------------------------------------
-// PRIX SOL
-// --------------------------------------------------
-
-async function getJupiterSolPrice() {
-  const cacheValid =
-    solPriceCached !== null &&
-    Date.now() - solPriceFetchedAt <
-      CONFIG.SOL_PRICE_CACHE_MS;
-
-  if (cacheValid) return solPriceCached;
-
-  const quote = await jupiterOrder(
-    SOL_MINT,
-    USDC_MINT,
-    "1000000000"
-  );
-
-  const price = Number(quote.outAmount) / 1000000;
-
-  if (!Number.isFinite(price) || price <= 0) {
-    throw new Error("Prix SOL invalide");
-  }
-
-  solPriceCached = price;
-  solPriceFetchedAt = Date.now();
-
-  jupiterLastSolPriceUsd = round(price, 4);
-
-  return price;
-}
-
-// --------------------------------------------------
-// IMPACT JUPITER
-// --------------------------------------------------
-
-function getPriceImpactPercent(quote) {
-  const raw =
-    quote.priceImpactPct !== undefined
-      ? quote.priceImpactPct
-      : quote.priceImpact;
-
-  if (raw === undefined || raw === null) return null;
-
-  const value = Number(raw);
-
-  if (!Number.isFinite(value)) return null;
-
-  return value <= 1
-    ? Math.abs(value * 100)
-    : Math.abs(value);
-}
-
-// --------------------------------------------------
-// VÉRIFICATION ACHAT + REVENTE
-// --------------------------------------------------
-
-async function checkJupiterSellability(pool, solPrice) {
-  const checkedAt = new Date().toISOString();
-
-  jupiterChecksCount++;
-
-  try {
-    const solAmount = Math.floor(
-      CONFIG.TEST_TRADE_USD / solPrice * 1e9
-    );
-
-    if (solAmount <= 0) {
-      throw new Error("Montant SOL invalide");
-    }
-
-    const buy = await jupiterOrder(
-      SOL_MINT,
-      pool.address,
-      String(solAmount)
-    );
-
-    const tokenAmount = BigInt(buy.outAmount);
-
-    if (tokenAmount <= 0n) {
-      throw new Error("Quantité achetable invalide");
-    }
-
-    const sell = await jupiterOrder(
-      pool.address,
-      SOL_MINT,
-      tokenAmount.toString()
-    );
-
-    const sellSol = Number(sell.outAmount) / 1e9;
-    const initialSol = solAmount / 1e9;
-
-    if (!Number.isFinite(sellSol) || sellSol <= 0) {
-      throw new Error("Montant de revente invalide");
-    }
-
-    const buyImpact = getPriceImpactPercent(buy);
-    const sellImpact = getPriceImpactPercent(sell);
-
-    if (buyImpact === null || sellImpact === null) {
-      throw new Error("Impact Jupiter indisponible");
-    }
-
-    const maxImpact = Math.max(
-      buyImpact,
-      sellImpact
-    );
-
-    if (maxImpact > CONFIG.MAX_JUPITER_IMPACT_PCT) {
-      throw new Error("Impact excessif");
-    }
-
-    const returnPercent =
-      ((sellSol - initialSol) / initialSol) * 100;
-
-    // Estimation indicative uniquement.
-    // Les frais réels dépendent de la transaction.
-    const estimatedNetworkFeesSol = 0.00001;
-
-    const netSellSol = Math.max(
-      0,
-      sellSol - estimatedNetworkFeesSol
-    );
-
-    const netReturnPercent =
-      ((netSellSol - initialSol) / initialSol) * 100;
-
-    pool.sellability =
-      "ACHAT + VENTE COTÉS (SIMULATION)";
-
-    pool.jupiter = {
-      verified: true,
-      checkedAt,
-
-      routerBuy: buy.router || null,
-      routerSell: sell.router || null,
-
-      buyAmount: buy.inAmount,
-      tokenAmount: buy.outAmount,
-      sellOutputSol: sell.outAmount,
-
-      buyPriceImpactPercent: round(buyImpact, 4),
-      sellPriceImpactPercent: round(sellImpact, 4),
-      maxPriceImpactPercent: round(maxImpact, 4),
-
-      roundTripReturnPercent: round(returnPercent, 3),
-      estimatedNetReturnPercent: round(netReturnPercent, 3),
-
-      quoteOnly: true,
-      executionPerformed: false
-    };
-
-    pool.simulation = {
-      tradeAmountUsd: CONFIG.TEST_TRADE_USD,
-      tradeAmountSol: round(initialSol, 9),
-
-      estimatedSellValueUsd:
-        round(sellSol * solPrice),
-
-      estimatedSellValueAfterBaseFeesUsd:
-        round(netSellSol * solPrice),
-
-      estimatedNetworkFeesSol,
-
-      roundTripReturnPercent: round(returnPercent, 3),
-      estimatedNetReturnPercent: round(netReturnPercent, 3),
-
-      priorityFee: "NON INCLUSE",
-      executionPerformed: false,
-      realQuote: true,
-      quoteOnly: true
-    };
-
-    pool.buyEligible = true;
-
-    jupiterSuccessCount++;
-    jupiterLastError = null;
-
-    return true;
-
-  } catch (error) {
-    pool.sellability = "VENTE NON VALIDÉE";
-    pool.buyEligible = false;
-
-    pool.jupiter = {
-      verified: false,
-      checkedAt,
-      error: error.message,
-      executionPerformed: false
-    };
-
-    pool.simulation = {
-      ...pool.simulation,
-      realQuote: false,
-      quoteOnly: true,
-      executionPerformed: false
-    };
-
-    jupiterLastError = error.message;
-
-    return false;
-  }
-}
-
-// --------------------------------------------------
-// MEILLEURE PAIRE
-// --------------------------------------------------
-
-function chooseBestPair(address, pairs) {
-  const matching = pairs.filter(pair => {
-    return pair && pair.address === address;
-  });
-
-  if (!matching.length) return null;
-
-  matching.sort((a, b) => {
-    return num(b.liquidity && b.liquidity.usd) -
-      num(a.liquidity && a.liquidity.usd);
-  });
-
-  return matching[0];
-}
-
-// --------------------------------------------------
-// ANALYSE ET SCORE
-// --------------------------------------------------
-
-function analyzePool(address, pair, mint) {
-  const liquidity = num(
-    pair.liquidity && pair.liquidity.usd
-  );
-
-  const volume = pair.volume || {};
-  const txns = pair.txns || {};
-  const changes = pair.priceChange || {};
-
-  const buys5m = num(txns.m5 && txns.m5.buys);
-  const sells5m = num(txns.m5 && txns.m5.sells);
-
-  const buys1h = num(txns.h1 && txns.h1.buys);
-  const sells1h = num(txns.h1 && txns.h1.sells);
-
-  const volume5m = num(volume.m5);
-  const volume1h = num(volume.h1);
-
-  const totalTransactions = buys1h + sells1h;
-
-  const buyRatio = totalTransactions > 0
-    ? buys1h / totalTransactions
-    : 0;
-
-  const sellRatio = totalTransactions > 0
-    ? sells1h / totalTransactions
-    : 0;
-
-  const createdAt = num(pair.pairCreatedAt);
-
-  const ageMinutes = createdAt > 0
-    ? Math.max(0, (Date.now() - createdAt) / 60000)
-    : null;
-
-  const previous = snapshots.get(address);
-
-  const acceleration =
-    previous && previous.volume5m > 0
-      ? volume5m / previous.volume5m
-      : 1;
-
-  snapshots.set(address, {
-    volume5m,
-    time: Date.now()
-  });
-
+async function checkCandidate(p) {
+  if (!p || !state.running) return;
+  p.lastCheckAt = now();
+  p.checkError = null;
   const risks = [];
-
-  if (liquidity < CONFIG.MIN_LIQUIDITY_USD) {
-    risks.push("LIQUIDITÉ FAIBLE");
+  try {
+    p.security = await inspectMint(p.mint);
+    risks.push(...p.security.risks);
+  } catch (e) {
+    p.security = { checked: false, error: safeError(e) };
+    risks.push("Sécurité mint non vérifiée");
   }
 
-  if (volume1h < CONFIG.MIN_VOLUME_1H_USD) {
-    risks.push("VOLUME FAIBLE");
-  }
-
-  if (ageMinutes === null) {
-    risks.push("ÂGE INCONNU");
-  } else if (ageMinutes < CONFIG.MIN_AGE_MINUTES) {
-    risks.push("TOKEN TRÈS RÉCENT");
-  }
-
-  if (!mint || !mint.checked) {
-    risks.push("AUTORITÉS NON VÉRIFIÉES");
-  } else {
-    if (!mint.initialized) {
-      risks.push("MINT NON INITIALISÉ");
+  let buy = null, sell = null, roundTripLossPct = null;
+  if (p.security.checked && risks.length === 0 && JUPITER_API_KEY) {
+    try {
+      state.jupiter.checksCount++;
+      state.jupiter.lastCheck = new Date().toISOString();
+      buy = await jupiterOrder(SOL_MINT, p.mint, CONFIG.buyTestLamports);
+      const tokenOut = String(buy.outAmount);
+      sell = await jupiterOrder(p.mint, SOL_MINT, tokenOut);
+      const solBack = Number(sell.outAmount);
+      const solIn = Number(CONFIG.buyTestLamports);
+      roundTripLossPct = solIn > 0 ? (1 - solBack / solIn) * 100 : null;
+      if (!Number.isFinite(roundTripLossPct)) throw new Error("Calcul du retour SOL impossible");
+      p.quotes = {
+        buyOk: true,
+        sellOk: true,
+        testInputSol: Number(CONFIG.buyTestLamports) / 1e9,
+        tokenOut,
+        solBack: solBack / 1e9,
+        roundTripLossPct: round(roundTripLossPct, 2),
+        buyPriceImpactPct: buy.priceImpactPct == null ? null : toNum(buy.priceImpactPct),
+        sellPriceImpactPct: sell.priceImpactPct == null ? null : toNum(sell.priceImpactPct),
+        checkedAt: new Date().toISOString()
+      };
+      state.jupiter.successCount++;
+      state.jupiter.lastError = null;
+      if (roundTripLossPct > CONFIG.maxRoundTripLossPct) risks.push("Coût aller-retour Jupiter supérieur à " + CONFIG.maxRoundTripLossPct + "%");
+    } catch (e) {
+      p.quotes = { buyOk: Boolean(buy), sellOk: Boolean(sell), error: safeError(e), checkedAt: new Date().toISOString() };
+      state.jupiter.lastError = safeError(e);
+      risks.push("Achat/revente non confirmés par Jupiter");
     }
+  } else if (!JUPITER_API_KEY) {
+    risks.push("Clé Jupiter absente : test achat/revente impossible");
+  }
 
-    if (mint.mintAuthorityActive) {
-      risks.push("AUTORITÉ MINT ACTIVE");
+  const total = p.buyCount + p.sellCount;
+  const buyers = p.buyers.size;
+  const pressure = total ? p.buyCount / total : 0;
+  p.buyPressure = pressure;
+  if (total < CONFIG.minSwaps) risks.push("Pas assez de swaps observés (" + total + "/" + CONFIG.minSwaps + ")");
+  if (buyers < CONFIG.minBuyers) risks.push("Pas assez d'acheteurs distincts (" + buyers + "/" + CONFIG.minBuyers + ")");
+  if (pressure < CONFIG.minBuyPressure) risks.push("Pression acheteuse insuffisante");
+
+  const securityScore = p.security.checked && p.security.risks.length === 0 ? 30 : 0;
+  const activityScore = Math.min(20, total * 2);
+  const buyerScore = Math.min(20, buyers * 5);
+  const pressureScore = Math.round(20 * pressure);
+  const quoteScore = p.quotes.buyOk && p.quotes.sellOk && roundTripLossPct != null && roundTripLossPct <= CONFIG.maxRoundTripLossPct ? 10 : 0;
+  p.score = securityScore + activityScore + buyerScore + pressureScore + quoteScore;
+  p.eligible = risks.length === 0 && p.quotes.buyOk && p.quotes.sellOk;
+  p.risks = [...new Set(risks)];
+  p.roundTripLossPct = roundTripLossPct == null ? null : round(roundTripLossPct, 2);
+  p.buyersCount = buyers;
+  p.activityCount = total;
+  p.checkedAt = new Date().toISOString();
+}
+
+async function runChecks() {
+  if (!state.running || state.scanning) return;
+  state.scanning = true;
+  try {
+    const candidates = [...state.pools.values()]
+      .filter(p => now() - p.lastCheckAt >= CONFIG.checkEveryMs)
+      .sort((a, b) => (b.swaps.length - a.swaps.length) || (b.lastSwapAt - a.lastSwapAt))
+      .slice(0, CONFIG.checkBatch);
+    for (const p of candidates) {
+      if (!state.running) break;
+      await checkCandidate(p);
+      await sleep(250);
     }
+    state.lastUpdate = new Date().toISOString();
+  } catch (e) {
+    state.lastError = safeError(e);
+  } finally {
+    state.scanning = false;
+  }
+}
 
-    if (mint.freezeAuthorityActive) {
-      risks.push("AUTORITÉ FREEZE ACTIVE");
+function rememberSignature(signature) {
+  if (!signature || state.seenSignatures.has(signature)) return false;
+  state.seenSignatures.add(signature);
+  if (state.seenSignatures.size > CONFIG.maxSeenSignatures) {
+    const first = state.seenSignatures.values().next().value;
+    state.seenSignatures.delete(first);
+  }
+  return true;
+}
+
+async function processSignature(signature, dexName, slot) {
+  try {
+    const tx = await heliusRpc("getTransaction", [signature, {
+      encoding: "jsonParsed",
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0
+    }]);
+    state.helius.lastCheck = new Date().toISOString();
+    state.helius.lastSlot = slot || tx?.slot || state.helius.lastSlot;
+    if (!tx || !tx.meta || tx.meta.err) return;
+    const swap = findSwapForSigner(tx);
+    if (!swap || !swap.mint || swap.mint === SOL_MINT || swap.mint === USDC_MINT || swap.mint === USDT_MINT) return;
+    addSwap(swap.mint, swap, dexName, signature, slot || tx.slot);
+    const p = state.pools.get(swap.mint);
+    if (p && !p.metadataRequested) {
+      p.metadataRequested = true;
+      enrichCandidate(p).catch(() => {});
     }
-
-    if (mint.token2022 && !mint.extensionsChecked) {
-      risks.push("EXTENSIONS NON VÉRIFIÉES");
-    }
-
-    if (
-      mint.dangerousExtensions &&
-      mint.dangerousExtensions.length
-    ) {
-      risks.push("EXTENSION TOKEN-2022 À RISQUE");
-    }
+    state.discovery.successCount++;
+    state.discovery.lastCheck = new Date().toISOString();
+    state.scanner = "LIVE";
+  } catch (e) {
+    state.helius.lastError = safeError(e);
+    state.discovery.failureCount++;
+    state.discovery.lastError = safeError(e);
   }
+}
 
-  if (totalTransactions < CONFIG.MIN_TRANSACTIONS_1H) {
-    risks.push("ACTIVITÉ FAIBLE");
+async function drainQueue() {
+  while (state.running && state.processing < 3 && state.signatureQueue.length) {
+    const item = state.signatureQueue.shift();
+    state.processing++;
+    processSignature(item.signature, item.dexName, item.slot)
+      .catch(e => { state.helius.lastError = safeError(e); })
+      .finally(() => { state.processing--; });
   }
+}
 
-  if (
-    totalTransactions >= 5 &&
-    buyRatio * 100 < CONFIG.MIN_BUY_RATIO
-  ) {
-    risks.push("PRESSION ACHETEUSE FAIBLE");
+function startHeliusSocket() {
+  if (!state.running || !HELIUS_RPC_URL) {
+    state.scanner = HELIUS_RPC_URL ? "STOPPED" : "ERROR";
+    if (!HELIUS_RPC_URL) state.lastError = "HELIUS_RPC_URL non configurée";
+    return;
   }
-
-  if (
-    totalTransactions >= 10 &&
-    sells1h > buys1h * 2
-  ) {
-    risks.push("PRESSION VENDEUSE");
+  const WebSocketImpl = globalThis.WebSocket;
+  if (!WebSocketImpl) {
+    state.scanner = "ERROR";
+    state.lastError = "WebSocket natif absent : configure Node.js 22 ou supérieur sur Render";
+    return;
   }
-
-  const volumeLiquidityRatio =
-    liquidity > 0 ? volume1h / liquidity : 0;
-
-  if (
-    volumeLiquidityRatio >
-    CONFIG.MAX_VOLUME_LIQUIDITY_RATIO
-  ) {
-    risks.push("VOLUME ANORMAL");
+  const url = rpcWebSocketUrl();
+  if (!url) {
+    state.scanner = "ERROR";
+    state.lastError = "URL WebSocket Helius invalide";
+    return;
   }
+  try {
+    state.scanner = "CONNECTING";
+    const ws = new WebSocketImpl(url);
+    state.ws = ws;
+    let requestId = 1;
+    const pending = new Map();
+    const subscriptions = new Map();
 
-  const momentum = num(changes.m5);
-  const momentum1h = num(changes.h1);
+    ws.addEventListener("open", () => {
+      state.helius.connected = true;
+      state.helius.lastError = null;
+      state.scanner = "LIVE";
+      for (const program of DEX_PROGRAMS) {
+        const id = requestId++;
+        pending.set(id, program);
+        ws.send(JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          method: "logsSubscribe",
+          params: [{ mentions: [program.id] }, { commitment: "confirmed" }]
+        }));
+      }
+      state.helius.subscriptions = DEX_PROGRAMS.length;
+      state.discovery.callsCount += DEX_PROGRAMS.length;
+      state.discovery.lastCheck = new Date().toISOString();
+    });
 
-  // Score rééquilibré sur 100.
-  let score = 0;
+    ws.addEventListener("message", event => {
+      let msg;
+      try { msg = JSON.parse(String(event.data)); } catch (_) { return; }
+      if (msg.id && pending.has(msg.id)) {
+        const program = pending.get(msg.id);
+        pending.delete(msg.id);
+        if (msg.error) {
+          state.helius.lastError = msg.error.message || "Échec abonnement Helius";
+          state.discovery.failureCount++;
+        } else {
+          subscriptions.set(msg.result, program);
+          state.helius.subscriptions = subscriptions.size;
+        }
+        return;
+      }
+      if (msg.method !== "logsNotification") return;
+      const result = msg.params?.result;
+      const value = result?.value;
+      const signature = value?.signature;
+      if (!signature || value.err) return;
+      const logs = Array.isArray(value.logs) ? value.logs : [];
+      // Keep only swap-like transactions; pool setup/admin traffic is not a trading signal.
+      if (!logs.some(line => /swap/i.test(String(line)))) return;
+      if (!rememberSignature(signature)) return;
+      const subId = result?.subscription;
+      const program = subscriptions.get(subId);
+      state.helius.transactionsSeen++;
+      state.signatureQueue.push({ signature, dexName: program?.name || "DEX Solana", slot: result?.context?.slot || null });
+      drainQueue();
+    });
 
-  score += Math.min(20, liquidity / 1000);
-  score += Math.min(20, volume1h / 500);
-  score += Math.min(15, totalTransactions / 2);
-  score += Math.min(20, buyRatio * 20);
-  score += Math.max(0, Math.min(10, momentum));
+    ws.addEventListener("error", () => {
+      state.helius.lastError = "Erreur WebSocket Helius";
+      state.scanner = "DEGRADED";
+    });
 
-  score += Math.min(
-    5,
-    Math.max(0, acceleration - 1) * 2
-  );
-
-  if (
-    ageMinutes !== null &&
-    ageMinutes >= 5 &&
-    ageMinutes <= 1440
-  ) {
-    score += 5;
+    ws.addEventListener("close", () => {
+      state.helius.connected = false;
+      state.helius.subscriptions = 0;
+      if (!state.running) return;
+      state.scanner = "DEGRADED";
+      state.helius.reconnects++;
+      clearTimeout(state.wsReconnectTimer);
+      state.wsReconnectTimer = setTimeout(startHeliusSocket, Math.min(30000, 3000 * Math.max(1, state.helius.reconnects)));
+    });
+  } catch (e) {
+    state.helius.connected = false;
+    state.scanner = "DEGRADED";
+    state.helius.lastError = safeError(e);
+    clearTimeout(state.wsReconnectTimer);
+    state.wsReconnectTimer = setTimeout(startHeliusSocket, 10000);
   }
+}
 
-  if (momentum < -5) score -= 5;
-  if (sellRatio > 0.65) score -= 8;
-  if (momentum1h < -15) score -= 5;
-
-  score = Math.round(
-    Math.max(0, Math.min(100, score))
-  );
-
-  if (score < CONFIG.MIN_SCORE) {
-    risks.push("SCORE INSUFFISANT");
-  }
-
-  const authorityVerified = Boolean(
-    mint &&
-    mint.checked &&
-    mint.initialized &&
-    !mint.mintAuthorityActive &&
-    !mint.freezeAuthorityActive &&
-    mint.extensionsChecked &&
-    (!mint.dangerousExtensions ||
-      mint.dangerousExtensions.length === 0)
-  );
-
-  const buyEligible =
-    authorityVerified &&
-    risks.length === 0;
-
-  const estimatedImpact =
-    liquidity > 0
-      ? CONFIG.TEST_TRADE_USD / (2 * liquidity) * 100
-      : null;
-
+function publicCandidate(p) {
+  const swaps = p.swaps || [];
   return {
-    address,
-    shortAddress: shorten(address),
-
-    name: pair.baseToken.name || "Token Solana",
-    symbol: pair.baseToken.symbol || "UNKNOWN",
-
-    dex: pair.dexId || "geckoterminal",
-    pairAddress: pair.pairAddress,
-    url: pair.url,
-
-    priceUsd: num(pair.priceUsd),
-
-    liquidityUsd: round(liquidity),
-    volume5mUsd: round(volume5m),
-    volume1hUsd: round(volume1h),
-
-    buys5m,
-    sells5m,
-    buys1h,
-    sells1h,
-
-    buyRatio: round(buyRatio * 100),
-    sellRatio: round(sellRatio * 100),
-
-    change5m: round(momentum),
-    change1h: round(momentum1h),
-
-    ageMinutes: ageMinutes === null
-      ? null
-      : round(ageMinutes),
-
-    acceleration: round(acceleration, 3),
-    volumeLiquidityRatio: round(volumeLiquidityRatio, 3),
-
-    score,
-
-    mintSecurity: mint || {
-      checked: false,
-      error: "Non vérifié"
-    },
-
-    authorityVerified,
-    risks,
-    buyEligible,
-
-    sellability: "NON VÉRIFIÉE",
-
-    jupiter: {
-      verified: false,
-      error: null
-    },
-
-    simulation: {
-      tradeAmountUsd: CONFIG.TEST_TRADE_USD,
-
-      estimatedImpactPercent:
-        estimatedImpact === null
-          ? null
-          : round(estimatedImpact, 4),
-
-      networkBaseFeeSol: 0.000005,
-
-      priorityFee: "NON INCLUSE",
-      swapFee: "VOIR COTATION JUPITER",
-
-      realQuote: false,
-      quoteOnly: true,
-      executionPerformed: false
-    }
+    address: p.mint,
+    mint: p.mint,
+    poolAddress: p.poolAddress,
+    name: p.name,
+    symbol: p.symbol,
+    dex: p.dex,
+    liquidity: null,
+    liquidityVerified: false,
+    volume: p.volume,
+    volumeUsd: p.volumeUsd,
+    volumeSol: round(p.volumeSol, 6),
+    price: null,
+    created: p.created,
+    firstSeenAt: new Date(p.firstSeenAt).toISOString(),
+    lastSwapAt: p.lastSwapAt ? new Date(p.lastSwapAt).toISOString() : null,
+    activityWindowMinutes: 15,
+    activityCount: swaps.length,
+    buyCount: p.buyCount,
+    sellCount: p.sellCount,
+    buyersCount: p.buyers.size,
+    buyPressure: round(p.buyPressure * 100, 1),
+    buyVolumeSol: round(p.buyVolumeSol, 6),
+    sellVolumeSol: round(p.sellVolumeSol, 6),
+    score: p.score,
+    eligible: p.eligible,
+    risks: p.risks,
+    security: p.security,
+    quotes: p.quotes,
+    roundTripLossPct: p.roundTripLossPct,
+    checkedAt: p.checkedAt || null
   };
 }
 
-// --------------------------------------------------
-// SCANNER PRINCIPAL
-// --------------------------------------------------
-
-async function scan() {
-  if (!running || scanning) return;
-
-  scanning = true;
-  scannerState = "SCANNING";
-
-  try {
-    const pairs = await discoverPools();
-
-    if (!pairs.length) {
-      throw new Error("Aucun pool exploitable trouvé");
-    }
-
-    // Priorité aux pools les plus liquides.
-    const sortedPairs = [...pairs].sort((a, b) => {
-      return num(b.liquidity && b.liquidity.usd) -
-        num(a.liquidity && a.liquidity.usd);
-    });
-
-    const uniqueAddresses = Array.from(
-      new Set(sortedPairs.map(pair => pair.address))
-    ).slice(0, CONFIG.MAX_POOLS);
-
-    const mintResults =
-      await checkMintAuthorities(uniqueAddresses);
-
-    const results = [];
-
-    for (const address of uniqueAddresses) {
-      const pair = chooseBestPair(address, pairs);
-
-      if (!pair) continue;
-
-      results.push(
-        analyzePool(
-          address,
-          pair,
-          mintResults.get(address)
-        )
-      );
-    }
-
-    results.sort((a, b) => b.score - a.score);
-
-    jupiterChecksCount = 0;
-    jupiterSuccessCount = 0;
-
-    const candidates = results
-      .filter(pool => pool.buyEligible)
-      .slice(0, CONFIG.MAX_JUPITER_CHECKS);
-
-    if (!JUPITER_API_KEY) {
-      jupiterLastError = "Clé API non configurée";
-
-      for (const pool of candidates) {
-        pool.buyEligible = false;
-        pool.sellability = "JUPITER NON CONFIGURÉ";
-
-        pool.jupiter = {
-          verified: false,
-          error: "JUPITER_API_KEY non configurée"
-        };
-      }
-
-    } else if (candidates.length > 0) {
-      try {
-        const solPrice = await getJupiterSolPrice();
-
-        for (const pool of candidates) {
-          if (isJupiterCooldown()) {
-            pool.buyEligible = false;
-            pool.sellability = "JUPITER EN PAUSE";
-
-            pool.jupiter = {
-              verified: false,
-              error: "Jupiter en pause"
-            };
-
-            break;
-          }
-
-          const success =
-            await checkJupiterSellability(pool, solPrice);
-
-          if (
-            !success &&
-            pool.jupiter &&
-            pool.jupiter.error === "Jupiter HTTP 429"
-          ) {
-            break;
-          }
-        }
-
-      } catch (error) {
-        jupiterLastError = error.message;
-
-        for (const pool of candidates) {
-          if (!pool.jupiter.verified) {
-            pool.buyEligible = false;
-            pool.sellability = "JUPITER NON DISPONIBLE";
-
-            pool.jupiter = {
-              verified: false,
-              error: error.message
-            };
-          }
-        }
-      }
-
-    } else {
-      jupiterLastError =
-        "Aucun candidat ne passe les filtres préalables";
-    }
-
-    results.sort((a, b) => {
-      if (a.buyEligible !== b.buyEligible) {
-        return a.buyEligible ? -1 : 1;
-      }
-
-      return b.score - a.score;
-    });
-
-    pools = results;
-
-    lastUpdate = new Date().toISOString();
-    lastError = null;
-
-    scannerState = geckoLastError
-      ? "DEGRADED"
-      : "OK";
-
-    for (const [key, value] of snapshots.entries()) {
-      if (Date.now() - value.time > 3600000) {
-        snapshots.delete(key);
-      }
-    }
-
-  } catch (error) {
-    lastError = error.message;
-
-    scannerState = "DEGRADED";
-
-    // Les anciens pools ne sont jamais effacés
-    // simplement parce qu'une API est indisponible.
-  } finally {
-    scanning = false;
-
-    const cooldownRemaining = Math.max(
-      geckoCooldownUntil - Date.now(),
-      0
-    );
-
-    scheduleNextScan(
-      Math.max(
-        CONFIG.SCAN_INTERVAL,
-        cooldownRemaining
-      )
-    );
-  }
-}
-
-// --------------------------------------------------
-// PROGRAMMATION
-// --------------------------------------------------
-
-function scheduleNextScan(delay) {
-  if (!running) return;
-
-  if (scanTimer) {
-    clearTimeout(scanTimer);
-  }
-
-  const safeDelay = Math.max(1000, delay);
-
-  nextScanAt = Date.now() + safeDelay;
-
-  scanTimer = setTimeout(() => {
-    scanTimer = null;
-    scan();
-  }, safeDelay);
-}
-
-// --------------------------------------------------
-// DÉMARRAGE / ARRÊT
-// --------------------------------------------------
-
-function startScanner() {
-  if (running && scanning) return;
-
-  if (scanTimer) clearTimeout(scanTimer);
-  if (heliusTimer) clearInterval(heliusTimer);
-  if (countdownTimer) clearInterval(countdownTimer);
-
-  running = true;
-  nextScanAt = Date.now();
-
-  scan();
-  checkHelius();
-
-  heliusTimer = setInterval(() => {
-    checkHelius();
-  }, 300000);
-
-  countdownTimer = setInterval(() => {
-    nextScanInSeconds = Math.max(
-      0,
-      Math.ceil((nextScanAt - Date.now()) / 1000)
-    );
-  }, 1000);
-}
-
-function stopScanner() {
-  running = false;
-
-  if (scanTimer) clearTimeout(scanTimer);
-  if (heliusTimer) clearInterval(heliusTimer);
-  if (countdownTimer) clearInterval(countdownTimer);
-
-  scanTimer = null;
-  heliusTimer = null;
-  countdownTimer = null;
-
-  nextScanInSeconds = 0;
-  scannerState = "STOPPED";
-}
-
-// --------------------------------------------------
-// ROUTES
-// --------------------------------------------------
-
-app.get("/", (req, res) => {
-  res.json({
-    name: "CART3R.JAILBREAK",
-    status: "online",
-    version: "GECKO-V5",
-    mode: "TEST",
-    realTrading: false
-  });
-});
-
-app.get("/health", (req, res) => {
-  res.json({
-    ok: true,
-    running,
-    scanner: scannerState,
-    realTrading: false
-  });
-});
-
-// --------------------------------------------------
-// STATUS
-// --------------------------------------------------
-
-app.get("/status", (req, res) => {
-  res.json({
-    running,
+function statusPayload() {
+  const pools = [...state.pools.values()];
+  const eligible = pools.filter(p => p.eligible);
+  return {
+    running: state.running,
     mode: "TEST",
     realTrading: false,
-
-    scanner: scannerState,
+    scanner: state.scanner,
     poolsFound: pools.length,
-    catalogPools: poolCatalog.size,
+    catalogPools: pools.length,
+    eligiblePools: eligible.length,
+    lastUpdate: state.lastUpdate,
+    lastError: state.lastError,
+    scanning: state.scanning,
+    nextScanInSeconds: state.running ? Math.max(0, Math.ceil(CONFIG.checkEveryMs / 1000)) : 0,
+    startedAt: state.startedAt,
+    discovery: { ...state.discovery, cachedFeeds: pools.length },
+    helius: { ...state.helius, configured: Boolean(HELIUS_RPC_URL) },
+    jupiter: { ...state.jupiter, configured: Boolean(JUPITER_API_KEY) },
+    protections: { ...state.protections }
+  };
+}
 
-    lastUpdate,
-    lastError,
+app.get("/", (_req, res) => res.json({
+  name: "CART3R.JAILBREAK",
+  version: "HELIUS-ONCHAIN-1",
+  mode: "TEST",
+  realTrading: false,
+  message: "Scanner Helius on-chain actif. Aucun ordre réel n'est exécuté.",
+  endpoints: ["/health", "/status", "/pools", "/security", "/helius-test", "/jupiter-test", "/gecko-test", "/test/start", "/test/stop"]
+}));
 
-    scanning,
-    nextScanInSeconds,
-
-    discovery: {
-      provider: "GECKOTERMINAL",
-      configured: true,
-
-      feeds: GECKO_FEEDS.length,
-      currentFeed: geckoCurrentFeed,
-      nextFeed: GECKO_FEEDS[geckoFeedIndex].name,
-
-      callsCount: geckoCallsCount,
-      successCount: geckoSuccessCount,
-      failureCount: geckoFailureCount,
-
-      lastCheck: geckoLastCheck,
-      lastError: geckoLastError,
-
-      backoffLevel: geckoBackoffLevel,
-
-      cooldownSeconds: Math.max(
-        0,
-        Math.ceil(
-          (geckoCooldownUntil - Date.now()) / 1000
-        )
-      ),
-
-      cachedFeeds: Array.from(geckoCache.keys())
-    },
-
-    helius: {
-      configured: Boolean(HELIUS_RPC_URL),
-      lastCheck: heliusLastCheck,
-      lastSlot: heliusLastSlot,
-      lastError: heliusError
-    },
-
-    jupiter: {
-      configured: Boolean(JUPITER_API_KEY),
-      api: "SWAP_V2",
-
-      lastCheck: jupiterLastCheck,
-      lastSolPriceUsd: jupiterLastSolPriceUsd,
-
-      checksCount: jupiterChecksCount,
-      successCount: jupiterSuccessCount,
-
-      cooldownSeconds: Math.max(
-        0,
-        Math.ceil(
-          (jupiterCooldownUntil - Date.now()) / 1000
-        )
-      ),
-
-      lastError: jupiterLastError
-    },
-
-    protections: {
-      mintAuthorityCheck: true,
-      freezeAuthorityCheck: true,
-      tokenProgramCheck: true,
-
-      token2022ExtensionInspection: true,
-
-      liquidityCheck: true,
-      volumeCheck: true,
-      suspiciousActivityCheck: true,
-
-      buyPressureCheck: true,
-      scoreCheck: true,
-
-      buyQuoteCheck: true,
-      sellQuoteCheck: true,
-
-      sellabilitySimulation: false,
-      realTrading: false
-    }
-  });
+app.get("/health", (_req, res) => res.json({ ok: true, service: "CART3R", mode: "TEST", realTrading: false }));
+app.get("/status", (_req, res) => res.json(statusPayload()));
+app.get("/pools", (_req, res) => {
+  const list = [...state.pools.values()].map(publicCandidate)
+    .sort((a, b) => Number(b.eligible) - Number(a.eligible) || b.score - a.score || b.activityCount - a.activityCount)
+    .slice(0, CONFIG.maxCandidates);
+  res.json({ ok: true, mode: "TEST", realTrading: false, count: list.length, pools: list });
 });
-
-// --------------------------------------------------
-// POOLS
-// --------------------------------------------------
-
-app.get("/pools", (req, res) => {
-  res.json({
-    ok: true,
-    count: pools.length,
-    catalogPools: poolCatalog.size,
-    maxPools: CONFIG.MAX_POOLS,
-
-    mode: "TEST",
-    realTrading: false,
-
-    pools
-  });
-});
-
-// --------------------------------------------------
-// SÉCURITÉ
-// --------------------------------------------------
-
-app.get("/security", (req, res) => {
-  res.json({
-    mode: "TEST",
-    realTrading: false,
-
-    checkedPools: pools.length,
-
-    eligiblePools: pools.filter(
-      p => p.buyEligible
-    ).length,
-
-    blockedPools: pools.filter(
-      p => !p.buyEligible
-    ).length,
-
-    catalogPools: poolCatalog.size,
-
-    discovery: {
-      provider: "GECKOTERMINAL",
-      lastError: geckoLastError,
-      currentFeed: geckoCurrentFeed
-    },
-
-    jupiter: {
-      configured: Boolean(JUPITER_API_KEY),
-
-      checksCount: jupiterChecksCount,
-      successCount: jupiterSuccessCount,
-
-      lastCheck: jupiterLastCheck,
-      lastError: jupiterLastError,
-
-      cooldownSeconds: Math.max(
-        0,
-        Math.ceil(
-          (jupiterCooldownUntil - Date.now()) / 1000
-        )
-      )
-    },
-
-    pools: pools.map(p => ({
-      name: p.name,
-      symbol: p.symbol,
-      address: p.address,
-
-      score: p.score,
-
-      liquidityUsd: p.liquidityUsd,
-      volume1hUsd: p.volume1hUsd,
-
-      buyRatio: p.buyRatio,
-      sellRatio: p.sellRatio,
-
-      change5m: p.change5m,
-      change1h: p.change1h,
-
-      ageMinutes: p.ageMinutes,
-      volumeLiquidityRatio: p.volumeLiquidityRatio,
-
-      buyEligible: p.buyEligible,
-      authorityVerified: p.authorityVerified,
-
-      mintSecurity: p.mintSecurity,
-      risks: p.risks,
-
-      sellability: p.sellability,
-
-      jupiter: p.jupiter,
-      simulation: p.simulation
-    }))
-  });
-});
-
-// --------------------------------------------------
-// TEST GECKOTERMINAL
-// Ne déclenche pas de nouvel appel API.
-// --------------------------------------------------
-
-app.get("/gecko-test", (req, res) => {
-  res.json({
-    ok: !isGeckoCooldown(),
-    provider: "GECKOTERMINAL",
-    currentFeed: geckoCurrentFeed,
-    catalogPools: poolCatalog.size,
-    callsCount: geckoCallsCount,
-    lastCheck: geckoLastCheck,
-    lastError: geckoLastError,
-
-    cooldownSeconds: Math.max(
-      0,
-      Math.ceil(
-        (geckoCooldownUntil - Date.now()) / 1000
-      )
-    )
-  });
-});
-
-// --------------------------------------------------
-// TEST HELIUS
-// --------------------------------------------------
-
-app.get("/helius-test", async (req, res) => {
-  const ok = await checkHelius();
-
-  res.status(ok ? 200 : 503).json({
-    ok,
-    slot: heliusLastSlot,
-    checkedAt: heliusLastCheck,
-    error: heliusError
-  });
-});
-
-// --------------------------------------------------
-// TEST JUPITER
-// --------------------------------------------------
-
-app.get("/jupiter-test", async (req, res) => {
+app.get("/security", async (req, res) => {
+  const mint = String(req.query.address || req.query.mint || "").trim();
+  if (!mint) return res.status(400).json({ ok: false, error: "Paramètre address ou mint manquant" });
   try {
-    if (!JUPITER_API_KEY) {
-      return res.status(503).json({
-        ok: false,
-        configured: false,
-        error: "JUPITER_API_KEY non configurée"
-      });
-    }
-
-    const price = await getJupiterSolPrice();
-
-    jupiterLastCheck = new Date().toISOString();
-    jupiterLastError = null;
-
-    res.json({
-      ok: true,
-      configured: true,
-      api: "SWAP_V2",
-      solPriceUsd: price,
-      checkedAt: jupiterLastCheck,
-      realTrading: false
-    });
-
-  } catch (error) {
-    jupiterLastError = error.message;
-
-    res.status(503).json({
-      ok: false,
-      configured: true,
-      api: "SWAP_V2",
-      error: error.message,
-      realTrading: false
-    });
+    const security = await inspectMint(mint);
+    res.json({ ok: true, mint, security, safe: security.risks.length === 0, realTrading: false });
+  } catch (e) {
+    res.status(502).json({ ok: false, mint, error: safeError(e), safe: false });
   }
 });
-
-// --------------------------------------------------
-// CONTRÔLES SCANNER
-// --------------------------------------------------
-
-app.post("/test/start", (req, res) => {
-  if (!running) {
-    startScanner();
+app.get("/helius-test", async (_req, res) => {
+  try {
+    const slot = await heliusRpc("getSlot", [{ commitment: "confirmed" }]);
+    state.helius.lastCheck = new Date().toISOString();
+    state.helius.lastSlot = slot;
+    state.helius.lastError = null;
+    res.json({ ok: true, slot, checkedAt: state.helius.lastCheck, websocketConnected: state.helius.connected });
+  } catch (e) {
+    state.helius.lastError = safeError(e);
+    res.status(502).json({ ok: false, error: safeError(e) });
   }
-
-  res.json({
-    ok: true,
-    running,
-    mode: "TEST",
-    realTrading: false
-  });
+});
+app.get("/jupiter-test", async (_req, res) => {
+  try {
+    const quote = await jupiterOrder(SOL_MINT, USDC_MINT, "1000000000");
+    state.jupiter.lastCheck = new Date().toISOString();
+    state.jupiter.lastSolPriceUsd = Number(quote.outAmount) / 1e6;
+    state.jupiter.lastError = null;
+    state.jupiter.checksCount++;
+    state.jupiter.successCount++;
+    res.json({ ok: true, api: "SWAP_V2_ORDER", inputSol: 1, outputUsdc: state.jupiter.lastSolPriceUsd, checkedAt: state.jupiter.lastCheck, quoteOnly: true });
+  } catch (e) {
+    state.jupiter.lastError = safeError(e);
+    res.status(502).json({ ok: false, error: safeError(e), quoteOnly: true });
+  }
+});
+app.get("/gecko-test", (_req, res) => res.json({
+  ok: true,
+  disabled: true,
+  provider: "HELIUS",
+  message: "GeckoTerminal a été retiré du scanner pour éviter les erreurs HTTP 429."
+}));
+app.post("/test/start", (_req, res) => {
+  if (!state.running) {
+    state.running = true;
+    state.scanner = "STARTING";
+    startHeliusSocket();
+  }
+  res.json({ ok: true, running: state.running, mode: "TEST", realTrading: false });
+});
+app.post("/test/stop", (_req, res) => {
+  state.running = false;
+  state.scanner = "STOPPED";
+  clearTimeout(state.wsReconnectTimer);
+  clearInterval(state.checkTimer);
+  if (state.ws) {
+    try { state.ws.close(); } catch (_) {}
+    state.ws = null;
+  }
+  state.helius.connected = false;
+  res.json({ ok: true, running: false, mode: "TEST", realTrading: false });
 });
 
-app.post("/test/stop", (req, res) => {
-  stopScanner();
-
-  res.json({
-    ok: true,
-    running,
-    mode: "TEST",
-    realTrading: false
-  });
+const server = app.listen(PORT, () => {
+  console.log("CART3R Helius scanner listening on", PORT, "mode=TEST realTrading=false");
+  if (!HELIUS_RPC_URL) {
+    state.scanner = "ERROR";
+    state.lastError = "HELIUS_RPC_URL non configurée";
+  } else {
+    startHeliusSocket();
+  }
+  state.checkTimer = setInterval(runChecks, 15000);
 });
 
-// --------------------------------------------------
-// SERVEUR
-// --------------------------------------------------
-
-app.listen(PORT, () => {
-  console.log("CART3R.JAILBREAK GECKO V5 démarré");
-  console.log("Découverte : GECKOTERMINAL");
-  console.log("Rotation : un flux par scan");
-  console.log("Maximum : 100 pools");
-  console.log("Catalogue cumulatif : 300 pools maximum");
-
-  console.log(
-    "HELIUS : " +
-    (HELIUS_RPC_URL ? "CONFIGURÉ" : "ABSENT")
-  );
-
-  console.log(
-    "JUPITER V2 : " +
-    (JUPITER_API_KEY ? "CONFIGURÉ" : "ABSENT")
-  );
-
-  console.log("MODE TEST");
-  console.log("TRADING RÉEL DÉSACTIVÉ");
-
-  startScanner();
+process.on("SIGTERM", () => {
+  state.running = false;
+  clearTimeout(state.wsReconnectTimer);
+  clearInterval(state.checkTimer);
+  if (state.ws) { try { state.ws.close(); } catch (_) {} }
+  server.close(() => process.exit(0));
 });
