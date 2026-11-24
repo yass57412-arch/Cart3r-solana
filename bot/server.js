@@ -628,7 +628,7 @@ function startHeliusSocket() {
       const logs = Array.isArray(value.logs) ? value.logs : [];
       // Keep only swap-like transactions; pool setup/admin traffic is not a trading signal.
       // Accept explicit swap instruction logs, not any incidental mention of the word "swap".
-      if (!logs.some(line => /Program log: Instruction:.*\\bswap[a-z0-9_]*\\b/i.test(String(line)))) return;
+      if (!logs.some(line => /Program log: Instruction:.*\bswap[a-z0-9_]*\b/i.test(String(line)))) return;
       if (!rememberSignature(signature)) return;
       const subId = result?.subscription;
       const program = subscriptions.get(subId);
