@@ -486,8 +486,6 @@ async function checkJupiterSellability(pool, solPrice) {
       throw new Error("Montant SOL invalide");
     }
 
-    // ACHAT THEORIQUE
-
     const buy = await jupiterOrder(
       SOL_MINT,
       pool.address,
@@ -499,8 +497,6 @@ async function checkJupiterSellability(pool, solPrice) {
     if (tokenAmount <= 0n) {
       throw new Error("Quantité achetable invalide");
     }
-
-    // REVENTE THEORIQUE
 
     const sell = await jupiterOrder(
       pool.address,
@@ -542,9 +538,6 @@ async function checkJupiterSellability(pool, solPrice) {
         round(maxImpact, 3) + "%"
       );
     }
-
-    // Une cotation sans impact disponible
-    // ne constitue pas une validation complète.
 
     if (maxImpact === null) {
       throw new Error(
@@ -698,8 +691,6 @@ async function getPairs(addresses) {
 
   try {
     const allPairs = [];
-
-    // Maximum 30 adresses par requête
 
     for (let i = 0; i < addresses.length; i += 30) {
       const group = addresses.slice(i, i + 30);
@@ -872,38 +863,18 @@ function analyzePool(address, pair, mint) {
   const momentum = num(changes.m5);
   const momentum1h = num(changes.h1);
 
-  // SCORE SUR 100
-
   let score = 0;
 
-  // Liquidité : 20 points
-
   score += Math.min(20, liquidity / 2500);
-
-  // Volume : 20 points
-
   score += Math.min(20, volume1h / 2000);
-
-  // Activité : 15 points
-
   score += Math.min(15, totalTransactions / 4);
-
-  // Pression acheteuse : 20 points
-
   score += buyRatio * 20;
-
-  // Momentum : 10 points
-
   score += Math.max(0, Math.min(10, momentum));
-
-  // Accélération du volume : 10 points
 
   score += Math.min(
     10,
     Math.max(0, acceleration - 1) * 5
   );
-
-  // Ancienneté : 5 points
 
   if (
     ageMinutes !== null &&
@@ -912,8 +883,6 @@ function analyzePool(address, pair, mint) {
   ) {
     score += 5;
   }
-
-  // Pénalités
 
   if (momentum < -5) score -= 5;
   if (sellRatio > 0.65) score -= 8;
@@ -1024,6 +993,27 @@ function analyzePool(address, pair, mint) {
 }
 
 // --------------------------------------------------
+// PLANIFICATION AUTOMATIQUE DU PROCHAIN SCAN
+// --------------------------------------------------
+
+function scheduleNextScan(delay) {
+  if (!running) return;
+
+  if (scanTimer) {
+    clearTimeout(scanTimer);
+  }
+
+  const safeDelay = Math.max(1000, delay);
+
+  nextScanAt = Date.now() + safeDelay;
+
+  scanTimer = setTimeout(() => {
+    scanTimer = null;
+    scan();
+  }, safeDelay);
+}
+
+// --------------------------------------------------
 // SCANNER PRINCIPAL
 // --------------------------------------------------
 
@@ -1032,6 +1022,11 @@ async function scan() {
 
   if (Date.now() < cooldownUntil) {
     scannerState = "COOLDOWN";
+
+    scheduleNextScan(
+      cooldownUntil - Date.now()
+    );
+
     return;
   }
 
@@ -1062,11 +1057,7 @@ async function scan() {
       );
     }
 
-    // PREMIER CLASSEMENT
-
     results.sort((a, b) => b.score - a.score);
-
-    // JUPITER
 
     jupiterChecksCount = 0;
     jupiterSuccessCount = 0;
@@ -1118,8 +1109,6 @@ async function scan() {
       }
     }
 
-    // CLASSEMENT FINAL
-
     results.sort((a, b) => {
       if (a.buyEligible !== b.buyEligible) {
         return a.buyEligible ? -1 : 1;
@@ -1133,8 +1122,6 @@ async function scan() {
     lastUpdate = new Date().toISOString();
     lastError = null;
     scannerState = "OK";
-
-    // NETTOYAGE DES SNAPSHOTS
 
     for (const [key, value] of snapshots.entries()) {
       if (Date.now() - value.time > 3600000) {
@@ -1155,10 +1142,13 @@ async function scan() {
   } finally {
     scanning = false;
 
-    nextScanAt = Math.max(
-      Date.now() + CONFIG.SCAN_INTERVAL,
-      cooldownUntil
-    );
+    if (running) {
+      const delay = Date.now() < cooldownUntil
+        ? cooldownUntil - Date.now()
+        : CONFIG.SCAN_INTERVAL;
+
+      scheduleNextScan(delay);
+    }
   }
 }
 
@@ -1167,7 +1157,7 @@ async function scan() {
 // --------------------------------------------------
 
 function startScanner() {
-  if (scanTimer) clearInterval(scanTimer);
+  if (scanTimer) clearTimeout(scanTimer);
   if (heliusTimer) clearInterval(heliusTimer);
   if (countdownTimer) clearInterval(countdownTimer);
 
@@ -1177,38 +1167,28 @@ function startScanner() {
   scan();
   checkHelius();
 
-  scanTimer = setInterval(() => {
-    if (Date.now() >= cooldownUntil) {
-      scan();
-    }
-  }, CONFIG.SCAN_INTERVAL);
-
   heliusTimer = setInterval(() => {
     checkHelius();
   }, 300000);
 
   countdownTimer = setInterval(() => {
-    if (cooldownUntil > Date.now()) {
-      nextScanInSeconds = Math.ceil(
-        (cooldownUntil - Date.now()) / 1000
-      );
-    } else {
-      nextScanInSeconds = Math.max(
-        0,
-        Math.ceil(
-          (nextScanAt - Date.now()) / 1000
-        )
-      );
-    }
+    const target = cooldownUntil > Date.now()
+      ? cooldownUntil
+      : nextScanAt;
+
+    nextScanInSeconds = Math.max(
+      0,
+      Math.ceil((target - Date.now()) / 1000)
+    );
   }, 1000);
 }
 
 function stopScanner() {
   running = false;
 
-  clearInterval(scanTimer);
-  clearInterval(heliusTimer);
-  clearInterval(countdownTimer);
+  if (scanTimer) clearTimeout(scanTimer);
+  if (heliusTimer) clearInterval(heliusTimer);
+  if (countdownTimer) clearInterval(countdownTimer);
 
   scanTimer = null;
   heliusTimer = null;
