@@ -8,7 +8,8 @@
  * - Uses Jupiter Swap V2 order quotes only to test a small buy -> sell round trip.
  *
  * Important: activity/volume below is ONLY what this process has observed since it started.
- * Exact pool reserves/liquidity are deliberately not fabricated; liquidity is null.
+ * Verified CPMM quote-side reserves are read on-chain; estimated total liquidity is labeled as an estimate.
+ * LaunchLab curve-only candidates remain ineligible until a verified Raydium CPMM pool is observed.
  */
 
 const express = require("express");
