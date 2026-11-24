@@ -7,28 +7,31 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
+
 const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL || "";
+const JUPITER_API_KEY = process.env.JUPITER_API_KEY || "";
+
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 const CONFIG = {
   MAX_POOLS: 30,
+  MAX_JUPITER_CHECKS: 8,
 
-  // Un scan toutes les 5 minutes
   SCAN_INTERVAL: 300000,
-
-  // Liste des tokens conservée 30 minutes
   ADDRESSES_CACHE_MS: 1800000,
-
-  // Données des paires conservées 5 minutes
   PAIRS_CACHE_MS: 300000,
-
   COOLDOWN_MS: 300000,
   REQUEST_TIMEOUT: 15000,
+
+  JUPITER_REQUEST_GAP_MS: 250,
 
   MIN_LIQUIDITY_USD: 3000,
   MIN_VOLUME_1H_USD: 500,
   MIN_AGE_MINUTES: 5,
 
   TEST_TRADE_USD: 10,
+  MAX_JUPITER_IMPACT_PCT: 5,
 
   PROFILES_URL:
     "https://api.dexscreener.com/token-profiles/latest/v1",
@@ -36,6 +39,10 @@ const CONFIG = {
   TOKENS_URL:
     "https://api.dexscreener.com/tokens/v1/solana/"
 };
+
+// --------------------------------------------------
+// VARIABLES
+// --------------------------------------------------
 
 let running = true;
 let scanning = false;
@@ -52,9 +59,18 @@ let heliusLastSlot = null;
 let heliusLastCheck = null;
 let heliusError = null;
 
+let jupiterLastCheck = null;
+let jupiterLastError = null;
+let jupiterLastSolPriceUsd = null;
+let jupiterChecksCount = 0;
+let jupiterSuccessCount = 0;
+
+let jupiterRequestAt = 0;
+
 let scanTimer = null;
 let heliusTimer = null;
 let countdownTimer = null;
+
 let nextScanInSeconds = 0;
 
 let cachedAddresses = [];
@@ -99,7 +115,9 @@ async function fetchJson(url) {
   try {
     const response = await fetch(url, {
       signal: controller.signal,
-      headers: { Accept: "application/json" }
+      headers: {
+        Accept: "application/json"
+      }
     });
 
     if (response.status === 429) {
@@ -118,13 +136,14 @@ async function fetchJson(url) {
     }
 
     return await response.json();
+
   } finally {
     clearTimeout(timeout);
   }
 }
 
 // --------------------------------------------------
-// HELIUS : INDÉPENDANT DE DEX SCREENER
+// HELIUS
 // --------------------------------------------------
 
 async function heliusRequest(method, params = []) {
@@ -142,7 +161,9 @@ async function heliusRequest(method, params = []) {
   try {
     const response = await fetch(HELIUS_RPC_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
@@ -159,10 +180,13 @@ async function heliusRequest(method, params = []) {
     const data = await response.json();
 
     if (data.error) {
-      throw new Error(data.error.message || "Erreur Helius");
+      throw new Error(
+        data.error.message || "Erreur Helius"
+      );
     }
 
     return data.result;
+
   } finally {
     clearTimeout(timeout);
   }
@@ -179,13 +203,17 @@ async function checkHelius() {
     heliusError = null;
 
     return true;
+
   } catch (error) {
     heliusError = error.message;
     return false;
   }
 }
 
-// Vérification Helius indépendante du scanner DEX.
+// --------------------------------------------------
+// VERIFICATION DES AUTORITES MINT
+// --------------------------------------------------
+
 async function checkMintAuthorities(addresses) {
   const results = new Map();
 
@@ -240,13 +268,18 @@ async function checkMintAuthorities(addresses) {
         results.set(address, {
           checked: true,
           initialized: data.readUInt8(45) === 1,
+
           mintAuthorityActive:
             data.readUInt32LE(0) !== 0,
+
           freezeAuthorityActive:
             data.readUInt32LE(46) !== 0,
+
           decimals: data.readUInt8(44),
+
           supply: data.readBigUInt64LE(36).toString()
         });
+
       } catch (error) {
         results.set(address, {
           checked: false,
@@ -254,6 +287,7 @@ async function checkMintAuthorities(addresses) {
         });
       }
     });
+
   } catch (error) {
     heliusError = error.message;
 
@@ -266,6 +300,309 @@ async function checkMintAuthorities(addresses) {
   }
 
   return results;
+}
+
+// --------------------------------------------------
+// JUPITER V2
+// COTATIONS ACHAT ET REVENTE
+// --------------------------------------------------
+
+async function jupiterOrder(inputMint, outputMint, amount) {
+  if (!JUPITER_API_KEY) {
+    throw new Error("JUPITER_API_KEY non configurée");
+  }
+
+  const wait = Math.max(
+    0,
+    CONFIG.JUPITER_REQUEST_GAP_MS -
+      (Date.now() - jupiterRequestAt)
+  );
+
+  if (wait > 0) {
+    await sleep(wait);
+  }
+
+  jupiterRequestAt = Date.now();
+
+  const params = new URLSearchParams({
+    inputMint,
+    outputMint,
+    amount: String(amount)
+  });
+
+  const controller = new AbortController();
+
+  const timeout = setTimeout(
+    () => controller.abort(),
+    CONFIG.REQUEST_TIMEOUT
+  );
+
+  try {
+    const response = await fetch(
+      "https://api.jup.ag/swap/v2/order?" + params,
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          "x-api-key": JUPITER_API_KEY
+        },
+        signal: controller.signal
+      }
+    );
+
+    const body = await response.text();
+
+    let data;
+
+    try {
+      data = JSON.parse(body);
+    } catch {
+      throw new Error(
+        "Réponse Jupiter invalide"
+      );
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        data.errorMessage ||
+        data.error ||
+        "Jupiter HTTP " + response.status
+      );
+    }
+
+    if (data.errorCode || data.errorMessage) {
+      throw new Error(
+        data.errorMessage || "Erreur Jupiter"
+      );
+    }
+
+    if (
+      !data.outAmount ||
+      BigInt(data.outAmount) <= 0n
+    ) {
+      throw new Error(
+        "Aucune quantité de sortie Jupiter"
+      );
+    }
+
+    return data;
+
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// --------------------------------------------------
+// PRIX SOL VIA JUPITER
+// --------------------------------------------------
+
+async function getJupiterSolPrice() {
+  const quote = await jupiterOrder(
+    SOL_MINT,
+    USDC_MINT,
+    "1000000000"
+  );
+
+  const price = Number(quote.outAmount) / 1000000;
+
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new Error("Prix SOL invalide");
+  }
+
+  jupiterLastSolPriceUsd = round(price, 4);
+
+  return price;
+}
+
+// --------------------------------------------------
+// EXTRACTION DE L'IMPACT DE PRIX
+// --------------------------------------------------
+
+function getPriceImpactPercent(quote) {
+  const raw =
+    quote.priceImpactPct !== undefined
+      ? quote.priceImpactPct
+      : quote.priceImpact;
+
+  if (raw === undefined || raw === null) {
+    return null;
+  }
+
+  const value = Number(raw);
+
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+
+  // Les valeurs décimales Jupiter sont converties
+  // en pourcentage.
+  return value <= 1
+    ? Math.abs(value * 100)
+    : Math.abs(value);
+}
+
+// --------------------------------------------------
+// VERIFICATION ACHAT + REVENTE JUPITER
+// --------------------------------------------------
+
+async function checkJupiterSellability(pool, solPrice) {
+  const checkedAt = new Date().toISOString();
+
+  try {
+    // Montant de test en SOL
+    const solAmount = Math.floor(
+      CONFIG.TEST_TRADE_USD / solPrice * 1e9
+    );
+
+    if (solAmount <= 0) {
+      throw new Error("Montant SOL invalide");
+    }
+
+    // 1. COTATION ACHAT : SOL -> TOKEN
+
+    const buy = await jupiterOrder(
+      SOL_MINT,
+      pool.address,
+      String(solAmount)
+    );
+
+    const tokenAmount = BigInt(buy.outAmount);
+
+    if (tokenAmount <= 0n) {
+      throw new Error("Quantité achetable invalide");
+    }
+
+    // 2. COTATION VENTE : TOKEN -> SOL
+    // On teste exactement le montant obtenu à l'achat.
+
+    const sell = await jupiterOrder(
+      pool.address,
+      SOL_MINT,
+      tokenAmount.toString()
+    );
+
+    const sellSol = Number(sell.outAmount) / 1e9;
+    const initialSol = solAmount / 1e9;
+
+    if (
+      !Number.isFinite(sellSol) ||
+      sellSol <= 0
+    ) {
+      throw new Error("Montant de revente invalide");
+    }
+
+    // Rendement théorique achat puis revente
+
+    const returnPercent =
+      ((sellSol - initialSol) / initialSol) * 100;
+
+    const buyImpact = getPriceImpactPercent(buy);
+    const sellImpact = getPriceImpactPercent(sell);
+
+    const impacts = [
+      buyImpact,
+      sellImpact
+    ].filter(value => value !== null);
+
+    const maxImpact = impacts.length
+      ? Math.max(...impacts)
+      : null;
+
+    // Protection contre un impact excessif
+
+    if (
+      maxImpact !== null &&
+      maxImpact > CONFIG.MAX_JUPITER_IMPACT_PCT
+    ) {
+      throw new Error(
+        "Impact de prix trop élevé : " +
+        round(maxImpact, 3) + "%"
+      );
+    }
+
+    // Résultat positif
+
+    pool.sellability = "COTATION ACHAT + VENTE OK";
+
+    pool.jupiter = {
+      verified: true,
+      checkedAt,
+
+      routerBuy: buy.router || null,
+      routerSell: sell.router || null,
+
+      buyAmount: buy.inAmount,
+      tokenAmount: buy.outAmount,
+      sellOutputSol: sell.outAmount,
+
+      buyFeeBps: buy.feeBps ?? null,
+      sellFeeBps: sell.feeBps ?? null,
+
+      buyPriceImpactPercent:
+        buyImpact === null
+          ? null
+          : round(buyImpact, 4),
+
+      sellPriceImpactPercent:
+        sellImpact === null
+          ? null
+          : round(sellImpact, 4),
+
+      maxPriceImpactPercent:
+        maxImpact === null
+          ? null
+          : round(maxImpact, 4),
+
+      roundTripReturnPercent:
+        round(returnPercent, 3),
+
+      quoteOnly: true
+    };
+
+    pool.simulation = {
+      ...pool.simulation,
+
+      tradeAmountUsd: CONFIG.TEST_TRADE_USD,
+      tradeAmountSol: round(initialSol, 9),
+
+      estimatedSellValueUsd:
+        round(sellSol * solPrice),
+
+      roundTripReturnPercent:
+        round(returnPercent, 3),
+
+      realQuote: true,
+      quoteOnly: true,
+
+      executionPerformed: false
+    };
+
+    pool.buyEligible = true;
+
+    jupiterSuccessCount++;
+
+    return true;
+
+  } catch (error) {
+    pool.sellability = "VENTE NON VALIDÉE";
+    pool.buyEligible = false;
+
+    pool.jupiter = {
+      verified: false,
+      checkedAt,
+      error: error.message
+    };
+
+    pool.simulation = {
+      ...pool.simulation,
+      realQuote: false,
+      executionPerformed: false
+    };
+
+    jupiterLastError = error.message;
+
+    return false;
+  }
 }
 
 // --------------------------------------------------
@@ -301,7 +638,9 @@ async function getAddresses() {
         addresses.push(item.tokenAddress);
       }
 
-      if (addresses.length >= CONFIG.MAX_POOLS) break;
+      if (addresses.length >= CONFIG.MAX_POOLS) {
+        break;
+      }
     }
 
     if (!addresses.length) {
@@ -312,6 +651,7 @@ async function getAddresses() {
     addressesFetchedAt = Date.now();
 
     return cachedAddresses;
+
   } catch (error) {
     if (cachedAddresses.length > 0) {
       console.log("Utilisation du cache des tokens");
@@ -339,7 +679,6 @@ async function getPairs(addresses) {
   try {
     const allPairs = [];
 
-    // Un seul appel groupé pour les 30 tokens.
     for (let i = 0; i < addresses.length; i += 30) {
       const group = addresses.slice(i, i + 30);
 
@@ -361,6 +700,7 @@ async function getPairs(addresses) {
     pairsFetchedAt = Date.now();
 
     return cachedPairs;
+
   } catch (error) {
     if (cachedPairs.length > 0) {
       console.log("Utilisation du cache des paires");
@@ -372,7 +712,7 @@ async function getPairs(addresses) {
 }
 
 // --------------------------------------------------
-// SÉLECTION DES PAIRES
+// SELECTION DES PAIRES
 // --------------------------------------------------
 
 function chooseBestPair(address, pairs) {
@@ -381,8 +721,11 @@ function chooseBestPair(address, pairs) {
       return false;
     }
 
-    const base = pair.baseToken && pair.baseToken.address;
-    const quote = pair.quoteToken && pair.quoteToken.address;
+    const base =
+      pair.baseToken && pair.baseToken.address;
+
+    const quote =
+      pair.quoteToken && pair.quoteToken.address;
 
     return base === address || quote === address;
   });
@@ -398,7 +741,7 @@ function chooseBestPair(address, pairs) {
 }
 
 // --------------------------------------------------
-// ANALYSE ET SÉCURITÉ
+// ANALYSE ET SECURITE
 // --------------------------------------------------
 
 function analyzePool(address, pair, mint) {
@@ -428,7 +771,10 @@ function analyzePool(address, pair, mint) {
   const createdAt = num(pair.pairCreatedAt);
 
   const ageMinutes = createdAt > 0
-    ? Math.max(0, (Date.now() - createdAt) / 60000)
+    ? Math.max(
+        0,
+        (Date.now() - createdAt) / 60000
+      )
     : null;
 
   const previous = snapshots.get(address);
@@ -493,6 +839,7 @@ function analyzePool(address, pair, mint) {
   score += Math.min(15, totalTransactions / 4);
   score += Math.min(15, buyRatio * 15);
   score += Math.max(0, Math.min(10, momentum));
+
   score += Math.min(
     10,
     Math.max(0, acceleration - 1) * 5
@@ -551,6 +898,7 @@ function analyzePool(address, pair, mint) {
     sells1h,
 
     buyRatio: round(buyRatio * 100),
+
     change5m: round(momentum),
     change1h: round(num(changes.h1)),
 
@@ -558,7 +906,7 @@ function analyzePool(address, pair, mint) {
       ? null
       : round(ageMinutes),
 
-    acceleration: round(acceleration),
+    acceleration,
     score,
 
     mintSecurity: mint || {
@@ -572,6 +920,11 @@ function analyzePool(address, pair, mint) {
 
     sellability: "NON VÉRIFIÉE",
 
+    jupiter: {
+      verified: false,
+      error: null
+    },
+
     simulation: {
       tradeAmountUsd: CONFIG.TEST_TRADE_USD,
 
@@ -581,15 +934,19 @@ function analyzePool(address, pair, mint) {
           : round(estimatedImpact, 4),
 
       networkBaseFeeSol: 0.000005,
+
       priorityFee: "NON INCLUSE",
-      swapFee: "NON INCLUSE",
-      realQuote: false
+      swapFee: "VOIR COTATION JUPITER",
+
+      realQuote: false,
+      quoteOnly: true,
+      executionPerformed: false
     }
   };
 }
 
 // --------------------------------------------------
-// SCANNER
+// SCANNER PRINCIPAL
 // --------------------------------------------------
 
 async function scan() {
@@ -608,7 +965,8 @@ async function scan() {
 
     const pairs = await getPairs(addresses);
 
-    // Helius reste indépendant des limites DEX.
+    // Helius indépendant de DexScreener
+
     const mintResults =
       await checkMintAuthorities(addresses);
 
@@ -628,6 +986,74 @@ async function scan() {
       );
     }
 
+    // Classement initial
+
+    results.sort((a, b) => b.score - a.score);
+
+    // ------------------------------------------------
+    // CONTROLE JUPITER
+    // ------------------------------------------------
+
+    jupiterChecksCount = 0;
+    jupiterSuccessCount = 0;
+    jupiterLastError = null;
+
+    const candidates = results
+      .filter(pool => pool.buyEligible)
+      .slice(0, CONFIG.MAX_JUPITER_CHECKS);
+
+    if (!JUPITER_API_KEY) {
+      for (const pool of candidates) {
+        pool.buyEligible = false;
+        pool.sellability = "JUPITER NON CONFIGURÉ";
+
+        pool.jupiter = {
+          verified: false,
+          error: "JUPITER_API_KEY non configurée"
+        };
+      }
+
+      jupiterLastError = "Clé API non configurée";
+
+    } else if (candidates.length > 0) {
+      try {
+        // Vérification du prix SOL
+
+        const solPrice = await getJupiterSolPrice();
+
+        for (const pool of candidates) {
+          await checkJupiterSellability(
+            pool,
+            solPrice
+          );
+
+          jupiterChecksCount++;
+        }
+
+        jupiterLastCheck =
+          new Date().toISOString();
+
+      } catch (error) {
+        jupiterLastError = error.message;
+
+        for (const pool of candidates) {
+          pool.buyEligible = false;
+
+          pool.sellability =
+            "JUPITER NON DISPONIBLE";
+
+          pool.jupiter = {
+            verified: false,
+            error: error.message
+          };
+        }
+      }
+    }
+
+    // ------------------------------------------------
+    // CLASSEMENT FINAL
+    // ------------------------------------------------
+
     results.sort((a, b) => {
       if (a.buyEligible !== b.buyEligible) {
         return a.buyEligible ? -1 : 1;
@@ -636,13 +1062,16 @@ async function scan() {
       return b.score - a.score;
     });
 
-    // Ne jamais effacer les anciennes données
-    // si un scan échoue.
+    // Ne pas effacer les anciennes données
+    // si le scan échoue.
+
     pools = results;
 
     lastUpdate = new Date().toISOString();
     lastError = null;
     scannerState = "OK";
+
+    // Nettoyage des anciennes statistiques
 
     for (const [key, value] of snapshots.entries()) {
       if (Date.now() - value.time > 3600000) {
@@ -654,13 +1083,17 @@ async function scan() {
     lastError = error.message;
 
     if (error.status === 429) {
-      cooldownUntil = Date.now() + CONFIG.COOLDOWN_MS;
+      cooldownUntil =
+        Date.now() + CONFIG.COOLDOWN_MS;
+
       scannerState = "COOLDOWN";
     } else {
       scannerState = "ERROR";
     }
+
   } finally {
     scanning = false;
+
     nextScanAt = Math.max(
       Date.now() + 1000,
       cooldownUntil,
@@ -670,7 +1103,7 @@ async function scan() {
 }
 
 // --------------------------------------------------
-// DÉMARRAGE ET ARRÊT
+// DEMARRAGE ET ARRET
 // --------------------------------------------------
 
 function startScanner() {
@@ -690,8 +1123,6 @@ function startScanner() {
     }
   }, CONFIG.SCAN_INTERVAL);
 
-  // Helius vérifié toutes les 5 minutes,
-  // sans utiliser l'API DEX.
   heliusTimer = setInterval(() => {
     checkHelius();
   }, 300000);
@@ -747,9 +1178,14 @@ app.get("/health", (req, res) => {
   });
 });
 
+// --------------------------------------------------
+// STATUS
+// --------------------------------------------------
+
 app.get("/status", (req, res) => {
   res.json({
     running,
+
     mode: "TEST",
     realTrading: false,
 
@@ -769,14 +1205,33 @@ app.get("/status", (req, res) => {
       lastError: heliusError
     },
 
+    jupiter: {
+      configured: Boolean(JUPITER_API_KEY),
+      api: "SWAP_V2",
+
+      lastCheck: jupiterLastCheck,
+      lastSolPriceUsd: jupiterLastSolPriceUsd,
+
+      checksCount: jupiterChecksCount,
+      successCount: jupiterSuccessCount,
+
+      lastError: jupiterLastError
+    },
+
     cache: {
       addresses: cachedAddresses.length,
       pairs: cachedPairs.length,
+
       addressesAgeSeconds: addressesFetchedAt
-        ? Math.floor((Date.now() - addressesFetchedAt) / 1000)
+        ? Math.floor(
+            (Date.now() - addressesFetchedAt) / 1000
+          )
         : null,
+
       pairsAgeSeconds: pairsFetchedAt
-        ? Math.floor((Date.now() - pairsFetchedAt) / 1000)
+        ? Math.floor(
+            (Date.now() - pairsFetchedAt) / 1000
+          )
         : null
     },
 
@@ -786,20 +1241,35 @@ app.get("/status", (req, res) => {
       liquidityCheck: true,
       volumeCheck: true,
       suspiciousActivityCheck: true,
+
+      sellabilityQuoteCheck: true,
+
+      // Une cotation n'est pas une simulation
+      // de transaction on-chain.
       sellabilitySimulation: false,
+
       realTrading: false
     }
   });
 });
+
+// --------------------------------------------------
+// POOLS
+// --------------------------------------------------
 
 app.get("/pools", (req, res) => {
   res.json({
     ok: true,
     count: pools.length,
     mode: "TEST",
+    realTrading: false,
     pools
   });
 });
+
+// --------------------------------------------------
+// SECURITE
+// --------------------------------------------------
 
 app.get("/security", (req, res) => {
   res.json({
@@ -816,20 +1286,38 @@ app.get("/security", (req, res) => {
       p => !p.buyEligible
     ).length,
 
+    jupiter: {
+      configured: Boolean(JUPITER_API_KEY),
+      checksCount: jupiterChecksCount,
+      successCount: jupiterSuccessCount,
+      lastCheck: jupiterLastCheck,
+      lastError: jupiterLastError
+    },
+
     pools: pools.map(p => ({
       name: p.name,
       symbol: p.symbol,
       address: p.address,
+
       score: p.score,
+
       buyEligible: p.buyEligible,
       authorityVerified: p.authorityVerified,
+
       mintSecurity: p.mintSecurity,
       risks: p.risks,
+
       sellability: p.sellability,
+
+      jupiter: p.jupiter,
       simulation: p.simulation
     }))
   });
 });
+
+// --------------------------------------------------
+// TEST HELIUS
+// --------------------------------------------------
 
 app.get("/helius-test", async (req, res) => {
   const ok = await checkHelius();
@@ -841,6 +1329,53 @@ app.get("/helius-test", async (req, res) => {
     error: heliusError
   });
 });
+
+// --------------------------------------------------
+// TEST JUPITER
+// --------------------------------------------------
+
+app.get("/jupiter-test", async (req, res) => {
+  try {
+    if (!JUPITER_API_KEY) {
+      return res.status(503).json({
+        ok: false,
+        configured: false,
+        error: "JUPITER_API_KEY non configurée"
+      });
+    }
+
+    const price = await getJupiterSolPrice();
+
+    jupiterLastCheck =
+      new Date().toISOString();
+
+    jupiterLastError = null;
+
+    res.json({
+      ok: true,
+      configured: true,
+      api: "SWAP_V2",
+      solPriceUsd: price,
+      checkedAt: jupiterLastCheck,
+      realTrading: false
+    });
+
+  } catch (error) {
+    jupiterLastError = error.message;
+
+    res.status(503).json({
+      ok: false,
+      configured: true,
+      api: "SWAP_V2",
+      error: error.message,
+      realTrading: false
+    });
+  }
+});
+
+// --------------------------------------------------
+// CONTROLES DU SCANNER
+// --------------------------------------------------
 
 app.post("/test/start", (req, res) => {
   startScanner();
@@ -871,6 +1406,12 @@ app.post("/test/stop", (req, res) => {
 app.listen(PORT, () => {
   console.log("CART3R.JAILBREAK démarré");
   console.log("30 POOLS MAXIMUM");
+  console.log("HELIUS : " +
+    (HELIUS_RPC_URL ? "CONFIGURÉ" : "ABSENT"));
+
+  console.log("JUPITER V2 : " +
+    (JUPITER_API_KEY ? "CONFIGURÉ" : "ABSENT"));
+
   console.log("MODE TEST - TRADING RÉEL DÉSACTIVÉ");
 
   startScanner();
