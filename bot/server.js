@@ -522,7 +522,7 @@ async function processSignature(signature, dexName, slot) {
     const tx = await heliusRpc("getTransaction", [signature, {
       encoding: "jsonParsed",
       commitment: "confirmed",
-      maxSupportedTransactionVersion: 0
+      maxSupportedTransactionVersion: 1
     }]);
     state.helius.lastCheck = new Date().toISOString();
     state.helius.lastSlot = slot || tx?.slot || state.helius.lastSlot;
