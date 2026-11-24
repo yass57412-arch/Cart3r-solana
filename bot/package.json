@@ -1,1 +1,16 @@
 
+{
+  "name": "cart3r-bot",
+  "version": "1.0.0",
+  "description": "CART3R Solana trading engine",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}
+
