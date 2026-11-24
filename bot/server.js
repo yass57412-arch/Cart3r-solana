@@ -45,16 +45,18 @@ const DEX_PROGRAMS = [
 ];
 
 const CONFIG = {
-  maxCandidates: 100,
+  maxCandidates: 30,
   windowMs: 15 * 60 * 1000,
   checkEveryMs: 45 * 1000,
-  checkBatch: 8,
+  checkBatch: 5,
   minSwaps: 5,
   minBuyers: 2,
   minBuyPressure: 0.55,
   maxRoundTripLossPct: 8,
   buyTestLamports: "10000000", // 0.01 SOL — quote only, no order execution
   maxSeenSignatures: 5000,
+  maxQueuedSignatures: 150,
+  maxConcurrentTransactions: 2,
   rpcTimeoutMs: 12000,
   jupiterTimeoutMs: 12000
 };
@@ -546,7 +548,7 @@ async function processSignature(signature, dexName, slot) {
 }
 
 async function drainQueue() {
-  while (state.running && state.processing < 1 && state.signatureQueue.length) {
+  while (state.running && state.processing < CONFIG.maxConcurrentTransactions && state.signatureQueue.length) {
     const item = state.signatureQueue.shift();
     state.processing++;
     processSignature(item.signature, item.dexName, item.slot)
@@ -625,13 +627,14 @@ function startHeliusSocket() {
       if (!signature || value.err) return;
       const logs = Array.isArray(value.logs) ? value.logs : [];
       // Keep only swap-like transactions; pool setup/admin traffic is not a trading signal.
-      if (!logs.some(line => /swap/i.test(String(line)))) return;
+      // Accept explicit swap instruction logs, not any incidental mention of the word "swap".
+      if (!logs.some(line => /Program log: Instruction:.*\\bswap[a-z0-9_]*\\b/i.test(String(line)))) return;
       if (!rememberSignature(signature)) return;
       const subId = result?.subscription;
       const program = subscriptions.get(subId);
       state.helius.transactionsSeen++;
       // Keep the newest events if the RPC backlog grows beyond a safe bound.
-      if (state.signatureQueue.length >= 300) {
+      if (state.signatureQueue.length >= CONFIG.maxQueuedSignatures) {
         state.signatureQueue.shift();
         state.helius.droppedQueuedTransactions++;
       }
