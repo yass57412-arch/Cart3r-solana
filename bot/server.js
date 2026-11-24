@@ -7,18 +7,20 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const API = "https://api.dexscreener.com";
 
-// CONFIGURATION
-const MAX_POOLS = 100;
-const TOKENS_PER_SCAN = 15;
-const SCAN_INTERVAL = 120000;
-const REQUEST_GAP = 1500;
+// CONFIGURATION CART3R
+const MAX_POOLS = 30;
+const TOKENS_PER_SCAN = 5;
+const SCAN_INTERVAL = 180000;
+const REQUEST_GAP = 2000;
 const COOLDOWN_MS = 90000;
+
 const MIN_LIQUIDITY = 3000;
 const MIN_VOLUME_1H = 500;
 const MAX_POOL_AGE = 30 * 60 * 1000;
 
 let running = true;
 let scanning = false;
+
 let pools = new Map();
 let snapshots = new Map();
 
@@ -54,47 +56,59 @@ async function apiGet(url) {
   return response.json();
 }
 
-function scorePool(pool, previous) {
+function calculateScore(pool, previous) {
   const liquidity = num(pool.liquidity?.usd);
   const volume1h = num(pool.volume?.h1);
   const volume5m = num(pool.volume?.m5);
+
   const buys = num(pool.txns?.h1?.buys);
   const sells = num(pool.txns?.h1?.sells);
   const buys5m = num(pool.txns?.m5?.buys);
   const sells5m = num(pool.txns?.m5?.sells);
-  const change = num(pool.priceChange?.h1);
 
+  const change = num(pool.priceChange?.h1);
   const total = buys + sells;
   const total5m = buys5m + sells5m;
 
-  // 1. Accélération du volume : 25 points
+  // Accélération du volume : 25 points
   let acceleration = 0;
 
   if (previous && previous.volume5m > 0) {
-    const growth = (volume5m - previous.volume5m) /
-      previous.volume5m;
-    acceleration = Math.max(0, Math.min(25, 12.5 + growth * 12.5));
-  } else if (volume1h > 0) {
-    acceleration = Math.min(25, (volume5m / volume1h) * 300);
+    const growth =
+      (volume5m - previous.volume5m) / previous.volume5m;
+
+    acceleration = Math.max(
+      0,
+      Math.min(25, 12.5 + growth * 12.5)
+    );
+  } else {
+    acceleration = Math.min(
+      25,
+      (volume5m / Math.max(volume1h, 1)) * 300
+    );
   }
 
-  // 2. Nombre d'achats : 20 points
+  // Nombre d'achats : 20 points
   const buyScore = Math.min(20, buys * 0.4);
 
-  // 3. Équilibre achats/ventes : 15 points
-  const buyRatio = total > 0 ? buys / total : 0;
-  const ratioScore = buyRatio * 15;
+  // Équilibre achats / ventes : 15 points
+  const ratioScore = total > 0
+    ? (buys / total) * 15
+    : 0;
 
-  // 4. Liquidité : 15 points
+  // Liquidité : 15 points
   const liquidityScore = Math.min(
     15,
     Math.log10(Math.max(1, liquidity / 1000)) * 7
   );
 
-  // 5. Momentum du prix : 15 points
-  const momentumScore = Math.max(0, Math.min(15, change * 1.5));
+  // Momentum : 15 points
+  const momentumScore = Math.max(
+    0,
+    Math.min(15, change * 1.5)
+  );
 
-  // 6. Activité récente : 10 points
+  // Activité récente : 10 points
   const activityScore = Math.min(10, total5m * 0.5);
 
   const score = Math.round(
@@ -109,34 +123,34 @@ function scorePool(pool, previous) {
   return {
     score: Math.min(100, Math.max(0, score)),
     acceleration: Math.round(acceleration),
-    buyRatio: Math.round(buyRatio * 100),
+    buyRatio: Math.round(
+      total > 0 ? (buys / total) * 100 : 0
+    ),
     activity5m: total5m
   };
 }
 
-function formatPool(pool) {
-  const liquidity = num(pool.liquidity?.usd);
-  const volume1h = num(pool.volume?.h1);
-
+function formatPool(pair) {
   return {
-    name: pool.baseToken?.name || "Inconnu",
-    symbol: pool.baseToken?.symbol || "???",
-    address: pool.baseToken?.address || "",
-    pairAddress: pool.pairAddress || "",
-    dex: pool.dexId || "Inconnu",
-    priceUsd: num(pool.priceUsd),
-    liquidity,
-    volume1h,
-    volume5m: num(pool.volume?.m5),
-    volume24h: num(pool.volume?.h24),
-    buys1h: num(pool.txns?.h1?.buys),
-    sells1h: num(pool.txns?.h1?.sells),
-    buys5m: num(pool.txns?.m5?.buys),
-    sells5m: num(pool.txns?.m5?.sells),
-    priceChange1h: num(pool.priceChange?.h1),
-    url: pool.url || "",
-    eligible: liquidity >= MIN_LIQUIDITY &&
-      volume1h >= MIN_VOLUME_1H,
+    name: pair.baseToken?.name || "Inconnu",
+    symbol: pair.baseToken?.symbol || "???",
+    address: pair.baseToken?.address || "",
+    pairAddress: pair.pairAddress || "",
+    dex: pair.dexId || "Inconnu",
+
+    priceUsd: num(pair.priceUsd),
+    liquidity: num(pair.liquidity?.usd),
+    volume1h: num(pair.volume?.h1),
+    volume5m: num(pair.volume?.m5),
+    volume24h: num(pair.volume?.h24),
+
+    buys1h: num(pair.txns?.h1?.buys),
+    sells1h: num(pair.txns?.h1?.sells),
+    buys5m: num(pair.txns?.m5?.buys),
+    sells5m: num(pair.txns?.m5?.sells),
+
+    priceChange1h: num(pair.priceChange?.h1),
+    url: pair.url || "",
     lastSeen: Date.now()
   };
 }
@@ -152,21 +166,24 @@ async function scanPools() {
 
   scanning = true;
   scannerState = "SCANNING";
-  lastError = null;
 
   try {
+    // Une seule requête pour découvrir les tokens
     const profiles = await apiGet(
       `${API}/token-profiles/latest/v1`
     );
 
-    const tokens = (Array.isArray(profiles) ? profiles : [])
+    const tokens = (
+      Array.isArray(profiles) ? profiles : []
+    )
       .filter(item =>
         item.chainId === "solana" && item.tokenAddress
       )
       .slice(0, TOKENS_PER_SCAN);
 
-    let successfulRequests = 0;
+    let successful = 0;
 
+    // Requêtes séquentielles pour limiter la pression API
     for (const token of tokens) {
       if (!running) break;
 
@@ -178,7 +195,7 @@ async function scanPools() {
         `${API}/token-pairs/v1/solana/${token.tokenAddress}`
       );
 
-      successfulRequests++;
+      successful++;
 
       if (Array.isArray(data)) {
         for (const pair of data) {
@@ -188,22 +205,27 @@ async function scanPools() {
           ) continue;
 
           const formatted = formatPool(pair);
+
           if (formatted.liquidity <= 0) continue;
 
-          const oldSnapshot = snapshots.get(formatted.pairAddress);
-          const scores = scorePool(pair, oldSnapshot);
+          const oldSnapshot = snapshots.get(
+            formatted.pairAddress
+          );
 
-          formatted.score = scores.score;
-          formatted.acceleration = scores.acceleration;
-          formatted.buyRatio = scores.buyRatio;
-          formatted.activity5m = scores.activity5m;
+          const score = calculateScore(pair, oldSnapshot);
 
-          formatted.risk =
-            formatted.liquidity < MIN_LIQUIDITY
-              ? "LIQUIDITÉ FAIBLE"
-              : formatted.volume1h < MIN_VOLUME_1H
-                ? "VOLUME FAIBLE"
-                : "À ANALYSER";
+          formatted.score = score.score;
+          formatted.acceleration = score.acceleration;
+          formatted.buyRatio = score.buyRatio;
+          formatted.activity5m = score.activity5m;
+
+          formatted.eligible =
+            formatted.liquidity >= MIN_LIQUIDITY &&
+            formatted.volume1h >= MIN_VOLUME_1H;
+
+          formatted.risk = !formatted.eligible
+            ? "CRITÈRES INSUFFISANTS"
+            : "À ANALYSER";
 
           pools.set(formatted.pairAddress, formatted);
 
@@ -217,7 +239,7 @@ async function scanPools() {
       await sleep(REQUEST_GAP);
     }
 
-    // Supprimer les pools non revus depuis 30 minutes
+    // Nettoyage des pools trop anciens
     const cutoff = Date.now() - MAX_POOL_AGE;
 
     for (const [key, pool] of pools.entries()) {
@@ -227,7 +249,7 @@ async function scanPools() {
       }
     }
 
-    // Garder les 100 meilleurs scores
+    // Classement des 30 pools les plus actifs
     const ranked = Array.from(pools.values())
       .filter(pool => pool.eligible)
       .sort((a, b) => b.score - a.score)
@@ -238,16 +260,20 @@ async function scanPools() {
     );
 
     lastUpdate = new Date().toISOString();
-    scannerState = successfulRequests > 0 ? "OK" : "EMPTY";
     lastError = null;
+    scannerState = successful > 0 ? "OK" : "EMPTY";
 
   } catch (error) {
     lastError = error.message || "Erreur inconnue";
+
     scannerState = Date.now() < cooldownUntil
       ? "COOLDOWN"
       : "ERROR";
+
+    // Les pools déjà récupérés sont conservés
   } finally {
     scanning = false;
+
     nextScanAt = Math.max(
       Date.now() + SCAN_INTERVAL,
       cooldownUntil
@@ -284,8 +310,9 @@ app.get("/", (req, res) => {
     name: "CART3R",
     mode: "TEST",
     source: "DEX Screener",
-    message: "Scanner actif",
-    endpoints: ["/health", "/status", "/pools"]
+    maxPools: MAX_POOLS,
+    scanIntervalSeconds: SCAN_INTERVAL / 1000,
+    message: "Scanner actif"
   });
 });
 
@@ -320,6 +347,7 @@ app.get("/pools", (req, res) => {
     mode: "TEST",
     source: "DEX Screener",
     count: pools.size,
+    maxPools: MAX_POOLS,
     lastUpdate,
     pools: Array.from(pools.values())
   });
@@ -347,7 +375,8 @@ app.post("/test/stop", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(
-    `CART3R active scanner TEST listening on ${PORT}`
+    `CART3R TEST scanner listening on port ${PORT}`
   );
+
   startScanner();
 });
