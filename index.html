@@ -1,27 +1,53 @@
+
 <!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CART3R — Solana Scanner</title>
+<title>CART3R — Solana Scanner x3</title>
 <style>
 :root{color-scheme:dark;--bg:#0b1020;--panel:#151d32;--line:#293653;--txt:#edf2ff;--muted:#9eacc8;--green:#35d39a;--red:#ff687d;--blue:#79a9ff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:15px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:16px}
-header{max-width:900px;margin:auto}h1{margin:4px 0;color:var(--green)}.sub{color:var(--muted);font-size:13px}
-main{max-width:900px;margin:16px auto;display:grid;gap:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px}
-h2{font-size:17px;margin:0 0 12px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}input{width:100%;padding:11px;border-radius:9px;border:1px solid var(--line);background:#0c1427;color:var(--txt);font-size:16px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:15px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:16px}
+header{max-width:900px;margin:auto}
+h1{margin:4px 0;color:var(--green)}
+.sub{color:var(--muted);font-size:13px}
+main{max-width:900px;margin:16px auto;display:grid;gap:14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px}
+h2{font-size:17px;margin:0 0 12px}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}
+input{width:100%;padding:11px;border-radius:9px;border:1px solid var(--line);background:#0c1427;color:var(--txt);font-size:16px}
 button{border:0;border-radius:10px;padding:11px 14px;background:var(--green);color:#06140f;font-weight:700;font-size:14px;cursor:pointer;margin:8px 6px 0 0}
-button.secondary{background:#2a3a5d;color:var(--txt)}button.sell{background:#ff8292;color:#25050a}button:disabled{opacity:.45;cursor:not-allowed}
-.stats{display:flex;gap:10px;flex-wrap:wrap}.stat{background:#0c1427;border:1px solid var(--line);padding:10px;border-radius:10px;flex:1;min-width:120px}.stat small{display:block;color:var(--muted)}.stat strong{font-size:19px}
-#status,.diagnostic{color:var(--muted);font-size:13px;margin-top:8px;line-height:1.5}.diagnostic{padding:10px;background:#0c1427;border:1px solid var(--line);border-radius:9px}
-.pool{border-top:1px solid var(--line);padding:12px 0}.pool:first-child{border-top:0}.pooltop{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}.token{font-weight:700}.meta{color:var(--muted);font-size:12px;margin:6px 0}.pill{display:inline-block;border:1px solid var(--line);border-radius:30px;padding:4px 8px;font-size:11px;color:var(--muted)}
-.actions{display:flex;gap:6px;flex-wrap:wrap}.actions button{margin-top:4px}.notice{font-size:12px;color:var(--muted);line-height:1.5}
-a{color:#9fc0ff}@media(max-width:560px){.grid{grid-template-columns:1fr}.stats{display:grid;grid-template-columns:1fr 1fr}}
+button.secondary{background:#2a3a5d;color:var(--txt)}
+button.sell{background:#ff8292;color:#25050a}
+button:disabled{opacity:.45;cursor:not-allowed}
+.stats{display:flex;gap:10px;flex-wrap:wrap}
+.stat{background:#0c1427;border:1px solid var(--line);padding:10px;border-radius:10px;flex:1;min-width:120px}
+.stat small{display:block;color:var(--muted)}
+.stat strong{font-size:19px}
+#status,.diagnostic{color:var(--muted);font-size:13px;margin-top:8px;line-height:1.5}
+.diagnostic{padding:10px;background:#0c1427;border:1px solid var(--line);border-radius:9px}
+.pool{border-top:1px solid var(--line);padding:12px 0}
+.pool:first-child{border-top:0}
+.pooltop{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.token{font-weight:700}
+.meta{color:var(--muted);font-size:12px;margin:6px 0}
+.pill{display:inline-block;border:1px solid var(--line);border-radius:30px;padding:4px 8px;font-size:11px;color:var(--muted)}
+.actions{display:flex;gap:6px;flex-wrap:wrap}
+.actions button{margin-top:4px}
+.notice{font-size:12px;color:var(--muted);line-height:1.5}
+a{color:#9fc0ff}
+.leverage{color:var(--green);font-weight:700}
+@media(max-width:560px){.grid{grid-template-columns:1fr}.stats{display:grid;grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
-<header><h1>CART3R.JAILBREAK</h1><div class="sub">Scanner Solana • Mode simulation uniquement • Aucun ordre réel</div></header>
+<header>
+<h1>CART3R.JAILBREAK</h1>
+<div class="sub">Scanner Solana • Simulation x3 • Aucun ordre réel</div>
+</header>
+
 <main>
 <section class="panel">
 <h2>Filtres de détection</h2>
@@ -30,9 +56,11 @@ a{color:#9fc0ff}@media(max-width:560px){.grid{grid-template-columns:1fr}.stats{d
 <div><label for="minVol">Volume 24 h minimum (USD)</label><input id="minVol" type="number" value="5000" min="0"></div>
 <div><label for="maxDrop">Baisse maximum 24 h (%)</label><input id="maxDrop" type="number" value="10" min="0"></div>
 </div>
-<button onclick="applyFilters()">Appliquer les filtres</button><button class="secondary" onclick="loadPools()">Actualiser les données</button>
+<button onclick="applyFilters()">Appliquer les filtres</button>
+<button class="secondary" onclick="loadPools()">Actualiser les données</button>
 <div id="status">Prêt. Appuie sur « Actualiser les données ».</div>
 </section>
+
 <section class="panel">
 <h2>Résultats des pools</h2>
 <div class="stats">
@@ -41,62 +69,104 @@ a{color:#9fc0ff}@media(max-width:560px){.grid{grid-template-columns:1fr}.stats{d
 </div>
 <div id="poolList" class="notice" style="margin-top:12px">Aucune donnée chargée.</div>
 </section>
+
 <section class="panel">
-<h2>Portefeuille virtuel</h2>
+<h2>Portefeuille virtuel x3</h2>
 <div class="stats">
 <div class="stat"><small>Solde disponible</small><strong id="cash">100,00 €</strong></div>
 <div class="stat"><small>Valeur des positions</small><strong id="positions">0,00 €</strong></div>
 <div class="stat"><small>Valeur totale estimée</small><strong id="total">100,00 €</strong></div>
 </div>
-<p class="notice">Capital fictif de 100 €. Chaque achat simulé utilise 10 €. Seuils de sortie simulée : vente à +20 % et protection à -10 %, uniquement après réception d'un nouveau cours valide pendant l'actualisation. Alerte visuelle à +10 %. Les positions et l'historique sont conservés dans le stockage local de ce navigateur. Pas de surveillance en arrière-plan.</p>
+
+<div class="diagnostic">
+<span class="leverage">LEVIER SIMULÉ x3 ACTIF</span><br>
+Mise par position : 10 € • Exposition : 30 €<br>
+Alerte : +10 % • Prise de bénéfice : +20 %<br>
+Protection : -10 % sur le prix du token.
+</div>
+
+<p class="notice">
+Le levier est uniquement mathématique et simulé. Les gains et pertes sont calculés sur une exposition de 30 € pour une mise de 10 €. Le résultat est crédité au portefeuille après clôture. Les positions et l'historique sont conservés dans le stockage local de ce navigateur. Pas de surveillance en arrière-plan.
+</p>
+
 <h2 style="margin-top:18px">Diagnostic des cours</h2>
-<div id="priceDiagnostics" class="diagnostic">Aucune vérification effectuée. Appuie sur « Actualiser les données ».</div>
+<div id="priceDiagnostics" class="diagnostic">Aucune vérification effectuée.</div>
+
 <h2 style="margin-top:18px">Positions ouvertes</h2>
 <div id="positionList" class="notice">Aucune position ouverte.</div>
+
 <h2 style="margin-top:18px">Historique</h2>
 <div id="history" class="notice">Aucune opération.</div>
+
 <button class="secondary" onclick="resetWallet()">Réinitialiser la simulation</button>
 </section>
+
 <section class="panel notice">
 <strong>Limites importantes</strong><br>
-Les données publiques peuvent être retardées, incomplètes ou limitées. La page fonctionne uniquement lorsqu'elle est ouverte et actualisée. La variation 24 h n'est pas toujours fournie : dans ce cas, le pool est écarté du filtre de baisse. Les filtres ne vérifient pas la sécurité d'un token et ne constituent pas un conseil financier. Aucun achat ou vente réel n'est effectué.
+Les données publiques peuvent être retardées, incomplètes ou limitées. La page fonctionne uniquement lorsqu'elle est ouverte et actualisée. Les filtres ne vérifient pas la sécurité d'un token. Le levier x3 n'est pas un véritable levier disponible sur GeckoTerminal. Aucun achat ou vente réel n'est effectué.
 </section>
 </main>
+
 <script>
 const API='https://api.geckoterminal.com/api/v2/networks/solana/new_pools?include=base_token,quote_token,dex';
 const KEY='cart3r_paper_wallet_v1';
+const LEVERAGE=3;
+const STAKE=10;
 let allPools=[];
+
 const euro=n=>Number(n||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const usd=n=>'$'+Number(n||0).toLocaleString('en-US',{maximumFractionDigits:0});
 const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
+
 function attrs(pool){return pool.attributes||{}}
+
 function getChange(a){
  const c=[a.price_change_percentage?.h24,a.price_change_percentage?.h1,a.price_change_percentage_24h,a.price_change_24h];
- for(const x of c){if(x!==undefined&&x!==null&&Number.isFinite(Number(x)))return Number(x)}
+ for(const x of c){
+  if(x!==undefined&&x!==null&&Number.isFinite(Number(x)))return Number(x);
+ }
  return null;
 }
+
 function getPools(){
  return allPools.map(p=>{
   const a=attrs(p),rel=p.relationships||{};
   const token=(rel.base_token?.data?.id||'').split('_').pop();
   const address=String(p.id||'').split('_').pop();
-  return {id:p.id,address,name:a.name||token||p.id,symbol:a.base_token_symbol||'',price:num(a.base_token_price_usd),liq:num(a.reserve_in_usd),vol:num(a.volume_usd?.h24),change:getChange(a),url:'https://www.geckoterminal.com/solana/pools/'+address};
+  return {
+   id:p.id,address,name:a.name||token||p.id,
+   symbol:a.base_token_symbol||'',
+   price:num(a.base_token_price_usd),
+   liq:num(a.reserve_in_usd),
+   vol:num(a.volume_usd?.h24),
+   change:getChange(a),
+   url:'https://www.geckoterminal.com/solana/pools/'+address
+  };
  });
 }
+
 function passing(){
- const minL=num(document.getElementById('minLiq').value),minV=num(document.getElementById('minVol').value),maxD=num(document.getElementById('maxDrop').value);
+ const minL=num(document.getElementById('minLiq').value);
+ const minV=num(document.getElementById('minVol').value);
+ const maxD=num(document.getElementById('maxDrop').value);
  return getPools().filter(p=>p.liq>=minL&&p.vol>=minV&&p.change!==null&&p.change>=-maxD);
 }
+
 function applyFilters(){renderPools()}
+
 async function fetchJson(url){
  const controller=new AbortController();
  const timer=setTimeout(()=>controller.abort(),12000);
  try{
-  const response=await fetch(url,{headers:{accept:'application/json','accept-version':'20230302'},signal:controller.signal});
+  const response=await fetch(url,{
+   headers:{accept:'application/json','accept-version':'20230302'},
+   signal:controller.signal
+  });
   if(!response.ok)throw new Error('Réponse HTTP '+response.status);
   return await response.json();
  }finally{clearTimeout(timer)}
 }
+
 async function loadPools(){
  const s=document.getElementById('status');
  s.textContent='Chargement des nouveaux pools…';
@@ -109,121 +179,317 @@ async function loadPools(){
   renderWallet();
   s.textContent='Actualisation terminée. '+allPools.length+' pool(s) reçus.';
  }catch(e){
-  s.textContent='Erreur de chargement des pools : '+(e.name==='AbortError'?'délai dépassé':e.message)+'. Réessaie plus tard.';
-  setDiagnostic('Impossible de charger les nouveaux pools : '+(e.name==='AbortError'?'délai dépassé':e.message));
+  s.textContent='Erreur de chargement : '+(e.name==='AbortError'?'délai dépassé':e.message)+'.';
+  setDiagnostic('Impossible de charger les pools : '+e.message);
  }
 }
+
 function renderPools(){
- const list=document.getElementById('poolList'),good=passing();
+ const list=document.getElementById('poolList');
+ const good=passing();
  document.getElementById('received').textContent=allPools.length;
  document.getElementById('passed').textContent=good.length;
+
  if(!allPools.length){list.textContent='Aucune donnée chargée.';return}
- if(!good.length){list.textContent='Aucun pool ne passe actuellement les trois filtres. La variation 24 h peut être absente des données.';return}
- list.innerHTML=good.map(p=>`<div class="pool"><div class="pooltop"><span class="token">${escapeHtml(p.name)}</span><span class="pill">Pool retenu</span></div><div class="meta">Liquidité ${usd(p.liq)} • Volume 24 h ${usd(p.vol)} • Variation ${p.change===null?'indisponible':p.change.toFixed(2)+'%'} • Prix ${p.price?('$'+p.price):'indisponible'}</div><div class="actions"><button onclick="buyPool('${encodeURIComponent(p.id)}')">Acheter 10 € en simulation</button><a href="${p.url}" target="_blank" rel="noopener">Voir le pool</a></div></div>`).join('');
+ if(!good.length){
+  list.textContent='Aucun pool ne passe actuellement les trois filtres.';
+  return;
+ }
+
+ list.innerHTML=good.map(p=>`
+ <div class="pool">
+  <div class="pooltop">
+   <span class="token">${escapeHtml(p.name)}</span>
+   <span class="pill">Pool retenu</span>
+  </div>
+  <div class="meta">
+   Liquidité ${usd(p.liq)} • Volume 24 h ${usd(p.vol)}
+   • Variation ${p.change.toFixed(2)}%
+   • Prix ${p.price?('$'+p.price):'indisponible'}
+  </div>
+  <div class="actions">
+   <button onclick="buyPool('${encodeURIComponent(p.id)}')">Acheter 10 € • x3</button>
+   <a href="${p.url}" target="_blank" rel="noopener">Voir le pool</a>
+  </div>
+ </div>`).join('');
 }
-function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+function escapeHtml(s){
+ return String(s).replace(/[&<>"']/g,c=>({
+  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+ }[c]));
+}
+
 function defaultWallet(){return {cash:100,positions:[],history:[]}}
+
 function readWallet(){
  try{
   const w=JSON.parse(localStorage.getItem(KEY));
   if(!w||typeof w!=='object')return defaultWallet();
-  return {cash:Number.isFinite(Number(w.cash))?Number(w.cash):100,positions:Array.isArray(w.positions)?w.positions:[],history:Array.isArray(w.history)?w.history:[]};
+  return {
+   cash:Number.isFinite(Number(w.cash))?Number(w.cash):100,
+   positions:Array.isArray(w.positions)?w.positions:[],
+   history:Array.isArray(w.history)?w.history:[]
+  };
  }catch(e){return defaultWallet()}
 }
+
 let wallet=readWallet();
-wallet.positions.forEach(p=>{p.freshPrice=false});
+
+wallet.positions.forEach(p=>{
+ p.freshPrice=false;
+ // Les anciennes positions restent en levier x1.
+ if(!Number(p.leverage))p.leverage=1;
+ if(!Number(p.exposure))p.exposure=Number(p.cost)||10;
+});
+
 function persist(){localStorage.setItem(KEY,JSON.stringify(wallet))}
 function save(){persist();renderWallet()}
+
 function buyPool(encodedId){
- const id=decodeURIComponent(encodedId),p=getPools().find(x=>x.id===id);
- if(!p){alert('Pool introuvable. Actualise les données puis réessaie.');return}
- if(!(p.price>0)){alert('Prix USD indisponible. Aucun achat simulé enregistré.');return}
- const stake=10;
- if(wallet.cash<stake){alert('Solde virtuel insuffisant.');return}
- wallet.cash-=stake;
- wallet.positions.push({id:p.id,name:p.name,symbol:p.symbol,price:p.price,lastPrice:p.price,lastPriceAt:null,priceStatus:'prix initial de simulation',qty:stake/p.price,cost:stake,url:p.url,freshPrice:false});
- wallet.history.unshift({type:'Achat fictif',name:p.name,amount:stake,date:new Date().toLocaleString('fr-FR')});
+ const id=decodeURIComponent(encodedId);
+ const p=getPools().find(x=>x.id===id);
+
+ if(!p){alert('Pool introuvable. Actualise les données.');return}
+ if(!(p.price>0)){alert('Prix USD indisponible.');return}
+ if(wallet.cash<STAKE){alert('Solde virtuel insuffisant.');return}
+
+ const exposure=STAKE*LEVERAGE;
+ wallet.cash-=STAKE;
+
+ wallet.positions.push({
+  id:p.id,
+  name:p.name,
+  symbol:p.symbol,
+  price:p.price,
+  lastPrice:p.price,
+  lastPriceAt:null,
+  priceStatus:'prix initial de simulation',
+  leverage:LEVERAGE,
+  exposure:exposure,
+  qty:exposure/p.price,
+  cost:STAKE,
+  url:p.url,
+  freshPrice:false
+ });
+
+ wallet.history.unshift({
+  type:'Achat fictif x3',
+  name:p.name,
+  amount:STAKE,
+  date:new Date().toLocaleString('fr-FR')
+ });
+
  save();
- alert('Achat simulé enregistré : 10 € fictifs.');
+ alert('Achat simulé x3 enregistré : mise 10 € • exposition 30 €.');
 }
-function latestPrice(pos){return Number(pos.lastPrice)>0?Number(pos.lastPrice):0}
-function setDiagnostic(message){const el=document.getElementById('priceDiagnostics');if(el)el.textContent=message}
+
+function latestPrice(pos){
+ return Number(pos.lastPrice)>0?Number(pos.lastPrice):0;
+}
+
+function positionPnl(pos,current){
+ if(!current||!pos.price)return 0;
+ const leverage=Number(pos.leverage)||1;
+ return Number(pos.cost)*leverage*(current/pos.price-1);
+}
+
+function positionEquity(pos,current){
+ return Math.max(0,Number(pos.cost)+positionPnl(pos,current));
+}
+
+function setDiagnostic(message){
+ const el=document.getElementById('priceDiagnostics');
+ if(el)el.textContent=message;
+}
+
 async function refreshPositionPrices(){
- if(!wallet.positions.length){setDiagnostic('Aucune position ouverte à actualiser.');return}
+ if(!wallet.positions.length){
+  setDiagnostic('Aucune position ouverte à actualiser.');
+  return;
+ }
+
  let updated=0,failed=0,details=[];
  const now=new Date().toISOString();
+
  for(const pos of wallet.positions){
   pos.freshPrice=false;
   const address=String(pos.id||'').split('_').pop();
-  if(!address){pos.priceStatus='adresse du pool absente';failed++;details.push(pos.name+': adresse absente');continue}
+
+  if(!address){
+   pos.priceStatus='adresse du pool absente';
+   failed++;
+   details.push(pos.name+': adresse absente');
+   continue;
+  }
+
   try{
    const url='https://api.geckoterminal.com/api/v2/networks/solana/pools/'+encodeURIComponent(address);
    const j=await fetchJson(url);
    const value=num(j?.data?.attributes?.base_token_price_usd);
+
    if(value>0){
-    pos.lastPrice=value;pos.lastPriceAt=now;pos.priceStatus='nouveau cours reçu';pos.freshPrice=true;updated++;
-    details.push(pos.name+': cours reçu à '+new Date(now).toLocaleTimeString('fr-FR'));
+    pos.lastPrice=value;
+    pos.lastPriceAt=now;
+    pos.priceStatus='nouveau cours reçu';
+    pos.freshPrice=true;
+    updated++;
+    details.push(pos.name+': cours reçu');
    }else{
-    pos.priceStatus='prix absent dans la réponse';failed++;details.push(pos.name+': prix absent');
+    pos.priceStatus='prix absent dans la réponse';
+    failed++;
+    details.push(pos.name+': prix absent');
    }
   }catch(e){
    pos.priceStatus=e.name==='AbortError'?'délai dépassé':'échec ('+e.message+')';
-   failed++;details.push(pos.name+': '+pos.priceStatus);
+   failed++;
+   details.push(pos.name+': '+pos.priceStatus);
   }
  }
+
  persist();
  setDiagnostic(updated+' cours reçu(s) • '+failed+' échec(s). '+details.join(' | '));
 }
+
+function closePosition(i,reason){
+ const p=wallet.positions[i];
+ if(!p)return;
+
+ const current=latestPrice(p);
+ const pnl=positionPnl(p,current);
+ const proceeds=Math.max(0,p.cost+pnl);
+
+ wallet.cash+=proceeds;
+ wallet.history.unshift({
+  type:reason,
+  name:p.name,
+  amount:proceeds,
+  date:new Date().toLocaleString('fr-FR')
+ });
+
+ wallet.positions.splice(i,1);
+ return true;
+}
+
 function checkAutoExits(){
  let changed=false;
+
  for(let i=wallet.positions.length-1;i>=0;i--){
-  const p=wallet.positions[i],current=latestPrice(p);
+  const p=wallet.positions[i];
+  const current=latestPrice(p);
+
   if(!p.freshPrice||!current||!p.price)continue;
+
   const pct=(current-p.price)/p.price*100;
   let reason='';
+
   if(pct>=20)reason='Vente automatique fictive +20 %';
   else if(pct<=-10)reason='Protection automatique fictive -10 %';
+
   if(reason){
-   const value=p.qty*current;
-   wallet.cash+=value;
-   wallet.history.unshift({type:reason,name:p.name,amount:value,date:new Date().toLocaleString('fr-FR')});
-   wallet.positions.splice(i,1);changed=true;
+   closePosition(i,reason);
+   changed=true;
   }
  }
+
  if(changed)persist();
 }
+
 function sell(i){
  const p=wallet.positions[i];
  if(!p)return;
- if(!p.freshPrice){alert('Aucun nouveau cours reçu pendant cette actualisation. Vente simulée suspendue pour éviter un prix périmé.');return}
+
+ if(!p.freshPrice){
+  alert('Aucun nouveau cours reçu. Vente simulée suspendue.');
+  return;
+ }
+
  const current=latestPrice(p);
  if(!current){alert('Prix actuel indisponible.');return}
- const value=p.qty*current;
- wallet.cash+=value;
- wallet.history.unshift({type:'Vente fictive',name:p.name,amount:value,date:new Date().toLocaleString('fr-FR')});
- wallet.positions.splice(i,1);save();
+
+ closePosition(i,'Vente fictive manuelle');
+ save();
 }
+
 function renderWallet(){
  document.getElementById('cash').textContent=euro(wallet.cash);
+
  let val=0,unknown=false;
- wallet.positions.forEach(p=>{const price=latestPrice(p);if(price>0)val+=p.qty*price;else unknown=true});
- document.getElementById('positions').textContent=unknown?'Prix actuel indisponible':euro(val);
- document.getElementById('total').textContent=unknown?'Estimation partielle : '+euro(wallet.cash+val):euro(wallet.cash+val);
+
+ wallet.positions.forEach(p=>{
+  const price=latestPrice(p);
+  if(price>0)val+=positionEquity(p,price);
+  else unknown=true;
+ });
+
+ document.getElementById('positions').textContent=
+  unknown?'Prix actuel indisponible':euro(val);
+
+ document.getElementById('total').textContent=
+  unknown?'Estimation partielle : '+euro(wallet.cash+val):euro(wallet.cash+val);
+
  const pl=document.getElementById('positionList');
+
  pl.innerHTML=wallet.positions.length?wallet.positions.map((p,i)=>{
-  const current=latestPrice(p),hasPrice=current>0,value=hasPrice?p.qty*current:0,pnl=hasPrice?value-p.cost:0;
-  const pct=hasPrice&&p.price>0?(current-p.price)/p.price*100:0;
-  const state=!hasPrice?'Cours indisponible':!p.freshPrice?'Dernier cours connu (non vérifié à cet instant)':pct>=10?'Alerte gain +10 %':pct<=-10?'Seuil de protection atteint':'Suivi en cours';
-  const updatedAt=p.lastPriceAt?new Date(p.lastPriceAt).toLocaleString('fr-FR'):'Pas encore actualisé depuis cet achat';
-  return `<div class="pool"><strong>${escapeHtml(p.name||'Position')}</strong><div class="meta">Mise : ${euro(p.cost)} • Valeur estimée : ${hasPrice?euro(value):'indisponible'} • Résultat estimé : ${hasPrice?euro(pnl)+' ('+pct.toFixed(2)+' %)':'indisponible'} • ${state}</div><div class="meta">Dernier cours reçu : ${escapeHtml(updatedAt)} • Diagnostic : ${escapeHtml(p.priceStatus||'en attente')}</div><button class="sell" onclick="sell(${i})" ${p.freshPrice?'':'disabled'}>Vendre en simulation</button></div>`;
+  const current=latestPrice(p);
+  const hasPrice=current>0;
+  const pnl=hasPrice?positionPnl(p,current):0;
+  const equity=hasPrice?positionEquity(p,current):0;
+  const pct=hasPrice&&p.price>0?(current/p.price-1)*100:0;
+  const leverage=Number(p.leverage)||1;
+  const exposure=Number(p.exposure)||Number(p.cost)*leverage;
+
+  const state=!hasPrice?'Cours indisponible':
+   !p.freshPrice?'Dernier cours connu (non vérifié)':
+   pct>=10?'Alerte gain +10 %':
+   pct<=-10?'Seuil de protection atteint':'Suivi en cours';
+
+  const updatedAt=p.lastPriceAt?
+   new Date(p.lastPriceAt).toLocaleString('fr-FR'):
+   'Pas encore actualisé depuis cet achat';
+
+  return `
+  <div class="pool">
+   <strong>${escapeHtml(p.name||'Position')}</strong>
+   <div class="meta">
+    <span class="leverage">LEVIER x${leverage}</span>
+    • Mise : ${euro(p.cost)}
+    • Exposition : ${euro(exposure)}
+   </div>
+   <div class="meta">
+    Valeur estimée : ${hasPrice?euro(equity):'indisponible'}
+    • Résultat : ${hasPrice?euro(pnl)+' ('+(pnl>=0?'+':'')+((pnl/p.cost)*100).toFixed(2)+' % sur la mise)':'indisponible'}
+    • ${state}
+   </div>
+   <div class="meta">
+    Variation du token : ${hasPrice?pct.toFixed(2)+'%':'indisponible'}
+    • Dernier cours : ${escapeHtml(updatedAt)}
+    • Diagnostic : ${escapeHtml(p.priceStatus||'en attente')}
+   </div>
+   <button class="sell" onclick="sell(${i})" ${p.freshPrice?'':'disabled'}>
+    Vendre en simulation
+   </button>
+  </div>`;
  }).join(''):'Aucune position ouverte.';
+
  const h=document.getElementById('history');
- h.innerHTML=wallet.history.length?wallet.history.slice(0,30).map(x=>`<div class="pool"><strong>${escapeHtml(x.type)} — ${escapeHtml(x.name)}</strong><div class="meta">${euro(x.amount)} • ${escapeHtml(x.date)}</div></div>`).join(''):'Aucune opération.';
+
+ h.innerHTML=wallet.history.length?
+ wallet.history.slice(0,30).map(x=>`
+ <div class="pool">
+  <strong>${escapeHtml(x.type)} — ${escapeHtml(x.name)}</strong>
+  <div class="meta">${euro(x.amount)} • ${escapeHtml(x.date)}</div>
+ </div>`).join(''):'Aucune opération.';
 }
+
 function resetWallet(){
  if(!confirm('Effacer le portefeuille virtuel et son historique ?'))return;
- wallet=defaultWallet();persist();renderWallet();setDiagnostic('Portefeuille virtuel réinitialisé.');
+ wallet=defaultWallet();
+ persist();
+ renderWallet();
+ setDiagnostic('Portefeuille virtuel réinitialisé.');
 }
+
 renderWallet();
 </script>
 </body>
