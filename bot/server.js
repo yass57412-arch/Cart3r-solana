@@ -8,10 +8,12 @@
  * - Uses Jupiter Swap V2 order quotes only to test a small buy -> sell round trip.
  *
  * Important: activity/volume below is ONLY what this process has observed since it started.
- * Exact pool reserves/liquidity are deliberately not fabricated; liquidity is null.
+ * Verified CPMM quote-side reserves are read on-chain; estimated total liquidity is labeled as an estimate.
+ * LaunchLab curve-only candidates remain ineligible until a verified Raydium CPMM pool is observed.
  */
 
 const express = require("express");
+const crypto = require("crypto");
 const app = express();
 app.use(express.json({ limit: "100kb" }));
 // Public read-only CORS for the GitHub Pages dashboard.
@@ -33,6 +35,7 @@ const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+const RAYDIUM_CPMM_PROGRAM = "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C";
 
 // Official mainnet program addresses. We listen for actual transactions, not market-indexer data.
 const DEX_PROGRAMS = [
@@ -42,7 +45,7 @@ const DEX_PROGRAMS = [
 ];
 
 const CONFIG = {
-  maxCandidates: 30,
+  maxCandidates: 100,
   windowMs: 15 * 60 * 1000,
   checkEveryMs: 45 * 1000,
   checkBatch: 5,
@@ -52,8 +55,10 @@ const CONFIG = {
   maxRoundTripLossPct: 8,
   buyTestLamports: "10000000", // 0.01 SOL — quote only, no order execution
   maxSeenSignatures: 5000,
-  maxQueuedSignatures: 150,
+  maxQueuedSignatures: 500,
   maxConcurrentTransactions: 2,
+  minLiquiditySol: 5,
+  quoteLadderLamports: ["10000000", "50000000"], // 0.01 and 0.05 SOL, quote-only
   rpcTimeoutMs: 12000,
   jupiterTimeoutMs: 12000
 };
@@ -93,6 +98,7 @@ const state = {
     api: "SWAP_V2_ORDER",
     lastCheck: null,
     lastSolPriceUsd: null,
+    lastSolPriceAt: 0,
     checksCount: 0,
     successCount: 0,
     cooldownSeconds: 0,
@@ -113,12 +119,15 @@ const state = {
     freezeAuthorityCheck: true,
     tokenProgramCheck: true,
     token2022ExtensionInspection: false,
-    liquidityCheck: false,
+    poolAddressDiscovery: true,
+    liquidityCheck: true,
     observedSwapActivityCheck: true,
     buyPressureCheck: true,
+    volumePressureCheck: true,
     scoreCheck: true,
     buyQuoteCheck: true,
     sellQuoteCheck: true,
+    quoteLadderCheck: true,
     sellabilitySimulation: false,
     realTrading: false
   }
@@ -158,7 +167,13 @@ async function fetchJson(url, options = {}, timeoutMs = CONFIG.rpcTimeoutMs) {
     try { json = body ? JSON.parse(body) : {}; } catch (_) {}
     if (!response.ok) {
       const detail = json.error?.message || body.slice(0, 160) || response.statusText;
-      throw new Error("HTTP " + response.status + ": " + detail);
+      const error = new Error("HTTP " + response.status + ": " + detail);
+      error.status = response.status;
+      const retryAfter = response.headers.get("retry-after");
+      error.retryAfterMs = retryAfter
+        ? (Number.isFinite(Number(retryAfter)) ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now()))
+        : 0;
+      throw error;
     }
     if (body && !Object.keys(json).length) throw new Error("Réponse JSON invalide (HTTP " + response.status + ")");
     return json;
@@ -170,10 +185,11 @@ async function fetchJson(url, options = {}, timeoutMs = CONFIG.rpcTimeoutMs) {
 // Serialize Helius HTTP RPC calls to avoid bursts that trigger HTTP 429.
 let heliusRpcTail = Promise.resolve();
 let lastHeliusRpcAt = 0;
+let heliusCooldownUntil = 0;
 async function executeHeliusRpc(method, params) {
   if (!HELIUS_RPC_URL) throw new Error("HELIUS_RPC_URL non configurée");
   for (let attempt = 0; attempt < 4; attempt++) {
-    const wait = Math.max(0, 350 - (Date.now() - lastHeliusRpcAt));
+    const wait = Math.max(heliusCooldownUntil - Date.now(), 350 - (Date.now() - lastHeliusRpcAt), 0);
     if (wait) await sleep(wait);
     lastHeliusRpcAt = Date.now();
     try {
@@ -185,9 +201,14 @@ async function executeHeliusRpc(method, params) {
       if (json.error) throw new Error(json.error.message || "Erreur RPC Helius");
       return json.result;
     } catch (e) {
-      if (!/429|rate.?limit|too many requests/i.test(safeError(e)) || attempt === 3) throw e;
-      const delay = 1200 * Math.pow(2, attempt);
-      state.helius.rpc429Retries++;
+      const limited = e?.status === 429 || /429|rate.?limit|too many requests/i.test(safeError(e));
+      const transient = e?.status >= 500 && e?.status <= 599;
+      if ((!limited && !transient) || attempt === 3) throw e;
+      const delay = limited && e?.retryAfterMs > 0 ? Math.min(e.retryAfterMs, 30000) : 1200 * Math.pow(2, attempt);
+      if (limited) {
+        state.helius.rpc429Retries++;
+        heliusCooldownUntil = Math.max(heliusCooldownUntil, Date.now() + delay);
+      }
       await sleep(delay);
     }
   }
@@ -222,6 +243,64 @@ function accountKeyObjects(tx) {
     if (typeof k === "string") return { pubkey: k, signer: i < required, index: i };
     return { pubkey: k.pubkey, signer: Boolean(k.signer) || i < required, index: i };
   });
+}
+
+// Anchor instruction data is base58. Decode it so pool discovery only accepts
+// the two documented CPMM swap instructions, not another 13-account instruction.
+function decodeBase58(value) {
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let number = 0n;
+  for (const char of String(value || "")) {
+    const digit = alphabet.indexOf(char);
+    if (digit < 0) return Buffer.alloc(0);
+    number = number * 58n + BigInt(digit);
+  }
+  const bytes = [];
+  while (number > 0n) {
+    bytes.unshift(Number(number & 255n));
+    number >>= 8n;
+  }
+  const leadingZeroes = (String(value).match(/^1*/) || [""])[0].length;
+  return Buffer.concat([Buffer.alloc(leadingZeroes), Buffer.from(bytes)]);
+}
+const CPMM_SWAP_DISCRIMINATORS = new Set([
+  crypto.createHash("sha256").update("global:swap_base_input").digest().subarray(0, 8).toString("hex"),
+  crypto.createHash("sha256").update("global:swap_base_output").digest().subarray(0, 8).toString("hex")
+]);
+
+// Raydium CPMM SwapBaseInput/Output uses a documented 13-account layout:
+// [3] pool_state, [6] input_vault, [7] output_vault, [10] input_mint, [11] output_mint.
+// Only report a pool when a matching swap discriminator and CPMM instruction are present.
+function extractRaydiumCpmmMarket(tx, mint) {
+  const keys = accountKeyObjects(tx);
+  const all = [
+    ...(tx?.transaction?.message?.instructions || []),
+    ...((tx?.meta?.innerInstructions || []).flatMap(x => x.instructions || []))
+  ];
+  for (const ix of all) {
+    const programId = ix.programId || keys[Number(ix.programIdIndex)]?.pubkey;
+    if (programId !== RAYDIUM_CPMM_PROGRAM) continue;
+    const data = decodeBase58(ix.data);
+    if (data.length < 8 || !CPMM_SWAP_DISCRIMINATORS.has(data.subarray(0, 8).toString("hex"))) continue;
+    const accounts = (ix.accounts || []).map(a =>
+      typeof a === "number" ? keys[a]?.pubkey : (typeof a === "string" ? a : a?.pubkey)
+    );
+    if (accounts.length < 13) continue;
+    const inputMint = accounts[10];
+    const outputMint = accounts[11];
+    if (inputMint !== mint && outputMint !== mint) continue;
+    const baseIsInput = inputMint === mint;
+    const market = {
+      poolAddress: accounts[3],
+      poolProgramId: RAYDIUM_CPMM_PROGRAM,
+      baseVault: baseIsInput ? accounts[6] : accounts[7],
+      quoteVault: baseIsInput ? accounts[7] : accounts[6],
+      quoteMint: baseIsInput ? outputMint : inputMint
+    };
+    if (market.poolAddress && market.baseVault && market.quoteVault &&
+        [SOL_MINT, USDC_MINT, USDT_MINT].includes(market.quoteMint)) return market;
+  }
+  return null;
 }
 
 function findSwapForSigner(tx) {
@@ -302,6 +381,18 @@ function getOrCreateCandidate(mint, dexName) {
       address: mint,
       mint,
       poolAddress: null,
+      poolProgramId: null,
+      baseVault: null,
+      quoteVault: null,
+      quoteMint: null,
+      liquidity: null,
+      liquidityVerified: false,
+      liquiditySol: null,
+      quoteReserveSol: null,
+      quoteLiquidity: null,
+      buyVolumeSolEquivalent: 0,
+      sellVolumeSolEquivalent: 0,
+      volumeBuyPressure: null,
       name: "Token " + mint.slice(0, 6) + "…" + mint.slice(-4),
       symbol: mint.slice(0, 5).toUpperCase(),
       dex: dexName,
@@ -337,27 +428,50 @@ function getOrCreateCandidate(mint, dexName) {
   return p;
 }
 
-function addSwap(mint, swap, dexName, signature, slot) {
-  const p = getOrCreateCandidate(mint, dexName);
-  if (!p) return;
-  const ts = now();
-  const solAmount = swap.quoteKind === "SOL" ? swap.quoteAmount : 0;
-  const usdAmount = swap.quoteKind === "USD_STABLE" ? swap.quoteAmount : null;
-  p.swaps.push({ ts, direction: swap.direction, trader: swap.trader, solAmount, usdAmount, signature, slot });
-  p.swaps = p.swaps.filter(x => ts - x.ts <= CONFIG.windowMs);
-  p.lastSwapAt = ts;
-  if (swap.direction === "BUY") p.buyers.add(swap.trader);
+function recalculateSwapMetrics(p) {
+  p.buyers = new Set(p.swaps.filter(x => x.direction === "BUY").map(x => x.trader));
   p.buyCount = p.swaps.filter(x => x.direction === "BUY").length;
   p.sellCount = p.swaps.filter(x => x.direction === "SELL").length;
   p.buyVolumeSol = p.swaps.filter(x => x.direction === "BUY").reduce((s, x) => s + x.solAmount, 0);
   p.sellVolumeSol = p.swaps.filter(x => x.direction === "SELL").reduce((s, x) => s + x.solAmount, 0);
   p.buyVolumeUsd = p.swaps.filter(x => x.direction === "BUY").reduce((s, x) => s + (x.usdAmount || 0), 0);
   p.sellVolumeUsd = p.swaps.filter(x => x.direction === "SELL").reduce((s, x) => s + (x.usdAmount || 0), 0);
+  p.buyVolumeSolEquivalent = p.swaps.filter(x => x.direction === "BUY" && x.solEquivalent != null).reduce((s, x) => s + x.solEquivalent, 0);
+  p.sellVolumeSolEquivalent = p.swaps.filter(x => x.direction === "SELL" && x.solEquivalent != null).reduce((s, x) => s + x.solEquivalent, 0);
   const total = p.buyCount + p.sellCount;
   p.buyPressure = total ? p.buyCount / total : 0;
+  const totalVolumeSol = p.buyVolumeSolEquivalent + p.sellVolumeSolEquivalent;
+  p.volumeBuyPressure = totalVolumeSol > 0 ? p.buyVolumeSolEquivalent / totalVolumeSol : null;
   p.volumeSol = p.buyVolumeSol + p.sellVolumeSol;
   p.volumeUsd = p.buyVolumeUsd + p.sellVolumeUsd || null;
   p.volume = p.volumeUsd || p.volumeSol;
+}
+
+function addSwap(mint, swap, dexName, signature, slot, market) {
+  const p = getOrCreateCandidate(mint, dexName);
+  if (!p) return;
+  const ts = now();
+  const solAmount = swap.quoteKind === "SOL" ? swap.quoteAmount : 0;
+  const usdAmount = swap.quoteKind === "USD_STABLE" ? swap.quoteAmount : null;
+  const solEquivalent = swap.quoteKind === "SOL"
+    ? swap.quoteAmount
+    : (state.jupiter.lastSolPriceUsd > 0 ? swap.quoteAmount / state.jupiter.lastSolPriceUsd : null);
+  p.swaps.push({ ts, direction: swap.direction, trader: swap.trader, solAmount, usdAmount, solEquivalent, signature, slot });
+  p.swaps = p.swaps.filter(x => ts - x.ts <= CONFIG.windowMs);
+  if (market) {
+    p.poolAddress = market.poolAddress;
+    p.poolProgramId = market.poolProgramId;
+    p.baseVault = market.baseVault;
+    p.quoteVault = market.quoteVault;
+    p.quoteMint = market.quoteMint;
+    p.liquidityVerified = false;
+    p.liquidity = null;
+    p.liquiditySol = null;
+    p.quoteReserveSol = null;
+    p.quoteLiquidity = null;
+  }
+  p.lastSwapAt = ts;
+  recalculateSwapMetrics(p);
   state.lastUpdate = new Date().toISOString();
   state.helius.swapsDecoded++;
 }
@@ -401,6 +515,17 @@ async function inspectMint(mint) {
   };
 }
 
+async function refreshSolPrice() {
+  if (state.jupiter.lastSolPriceUsd > 0 && now() - state.jupiter.lastSolPriceAt < 5 * 60 * 1000) return state.jupiter.lastSolPriceUsd;
+  const quote = await jupiterOrder(SOL_MINT, USDC_MINT, "1000000000");
+  const price = Number(quote.outAmount) / 1e6;
+  if (!Number.isFinite(price) || price <= 0) throw new Error("Prix SOL/USDC invalide");
+  state.jupiter.lastSolPriceUsd = price;
+  state.jupiter.lastSolPriceAt = now();
+  state.jupiter.lastCheck = new Date().toISOString();
+  return price;
+}
+
 async function jupiterOrder(inputMint, outputMint, amount) {
   if (!JUPITER_API_KEY) throw new Error("JUPITER_API_KEY non configurée");
   const url = new URL("https://api.jup.ag/swap/v2/order");
@@ -415,6 +540,67 @@ async function jupiterOrder(inputMint, outputMint, amount) {
   return json;
 }
 
+async function verifyPoolLiquidity(p) {
+  if (!p.poolAddress || p.poolProgramId !== RAYDIUM_CPMM_PROGRAM || !p.baseVault || !p.quoteVault) {
+    p.liquidityVerified = false;
+    return { ok: false, reason: "Pool Raydium CPMM et ses coffres non identifiés" };
+  }
+  const result = await heliusRpc("getMultipleAccounts", [
+    [p.poolAddress, p.baseVault, p.quoteVault],
+    { encoding: "jsonParsed", commitment: "confirmed" }
+  ]);
+  const accounts = result?.value || [];
+  if (accounts.length !== 3 || accounts.some(x => !x)) throw new Error("Compte pool ou coffre introuvable");
+  const [pool, baseVault, quoteVault] = accounts;
+  if (pool.owner !== RAYDIUM_CPMM_PROGRAM) throw new Error("Propriétaire du pool CPMM invalide");
+  const baseInfo = baseVault.data?.parsed?.info;
+  const quoteInfo = quoteVault.data?.parsed?.info;
+  if (!baseInfo || !quoteInfo || baseInfo.mint !== p.mint || quoteInfo.mint !== p.quoteMint) {
+    throw new Error("Les coffres ne correspondent pas aux mints attendus");
+  }
+  const baseAmount = Number(baseInfo.tokenAmount?.uiAmountString ?? baseInfo.tokenAmount?.uiAmount ?? 0);
+  const quoteAmount = Number(quoteInfo.tokenAmount?.uiAmountString ?? quoteInfo.tokenAmount?.uiAmount ?? 0);
+  if (!Number.isFinite(baseAmount) || !Number.isFinite(quoteAmount) || baseAmount <= 0 || quoteAmount <= 0) {
+    throw new Error("Réserves du pool nulles ou invalides");
+  }
+  let quoteSol = null;
+  if (p.quoteMint === SOL_MINT) quoteSol = quoteAmount;
+  else if (p.quoteMint === USDC_MINT || p.quoteMint === USDT_MINT) {
+    const solPrice = await refreshSolPrice();
+    quoteSol = quoteAmount / solPrice;
+  }
+  if (!Number.isFinite(quoteSol) || quoteSol <= 0) throw new Error("Réserve de cotation non convertible en SOL");
+  p.quoteLiquidity = quoteAmount;
+  p.quoteReserveSol = round(quoteSol, 4);
+  // CPMM reserves are approximately value-balanced at spot: report an estimate, not an exact TVL.
+  p.liquiditySol = round(quoteSol * 2, 4);
+  p.liquidity = p.liquiditySol;
+  p.liquidityVerified = quoteSol >= CONFIG.minLiquiditySol;
+  p.liquidityCheckedAt = new Date().toISOString();
+  p.baseReserve = round(baseAmount, 4);
+  return {
+    ok: p.liquidityVerified,
+    reason: p.liquidityVerified ? null : "Liquidité de cotation inférieure à " + CONFIG.minLiquiditySol + " SOL"
+  };
+}
+
+async function testRoundTrip(inputLamports, mint) {
+  const buy = await jupiterOrder(SOL_MINT, mint, inputLamports);
+  const tokenOut = String(buy.outAmount);
+  const sell = await jupiterOrder(mint, SOL_MINT, tokenOut);
+  const solIn = Number(inputLamports);
+  const solBack = Number(sell.outAmount);
+  const loss = solIn > 0 ? (1 - solBack / solIn) * 100 : null;
+  if (!Number.isFinite(loss) || solBack <= 0) throw new Error("Retour SOL invalide");
+  return {
+    buyOk: true, sellOk: true,
+    inputSol: solIn / 1e9, tokenOut, solBack: solBack / 1e9,
+    roundTripLossPct: round(loss, 2),
+    buyPriceImpactPct: buy.priceImpactPct == null ? null : toNum(buy.priceImpactPct),
+    sellPriceImpactPct: sell.priceImpactPct == null ? null : toNum(sell.priceImpactPct)
+  };
+}
+
 async function checkCandidate(p) {
   if (!p || !state.running) return;
   p.lastCheckAt = now();
@@ -424,43 +610,67 @@ async function checkCandidate(p) {
     p.security = await inspectMint(p.mint);
     risks.push(...p.security.risks);
   } catch (e) {
-    p.security = { checked: false, error: safeError(e) };
+    p.security = { checked: false, error: safeError(e), risks: [] };
     risks.push("Sécurité mint non vérifiée");
   }
 
-  let buy = null, sell = null, roundTripLossPct = null;
-  if (p.security.checked && risks.length === 0 && JUPITER_API_KEY) {
+  if (JUPITER_API_KEY) {
     try {
-      state.jupiter.checksCount++;
+      const solPrice = await refreshSolPrice();
+      for (const swap of p.swaps) {
+        swap.solEquivalent = swap.usdAmount != null ? swap.usdAmount / solPrice : swap.solAmount;
+      }
+      recalculateSwapMetrics(p);
+    } catch (_) {
+      // Keep stablecoin-denominated flow unverified if the SOL/USD reference is unavailable.
+    }
+  }
+
+  try {
+    const market = await verifyPoolLiquidity(p);
+    if (!market.ok) risks.push(market.reason);
+  } catch (e) {
+    p.liquidityVerified = false;
+    p.liquidity = null;
+    p.liquiditySol = null;
+    p.quoteReserveSol = null;
+    risks.push("Liquidité du pool non vérifiée : " + safeError(e));
+  }
+
+  let small = null, medium = null, roundTripLossPct = null;
+  if (p.security.checked && p.security.risks.length === 0 && JUPITER_API_KEY) {
+    try {
+      state.jupiter.checksCount += 4;
       state.jupiter.lastCheck = new Date().toISOString();
-      buy = await jupiterOrder(SOL_MINT, p.mint, CONFIG.buyTestLamports);
-      const tokenOut = String(buy.outAmount);
-      sell = await jupiterOrder(p.mint, SOL_MINT, tokenOut);
-      const solBack = Number(sell.outAmount);
-      const solIn = Number(CONFIG.buyTestLamports);
-      roundTripLossPct = solIn > 0 ? (1 - solBack / solIn) * 100 : null;
-      if (!Number.isFinite(roundTripLossPct)) throw new Error("Calcul du retour SOL impossible");
+      small = await testRoundTrip(CONFIG.quoteLadderLamports[0], p.mint);
+      medium = await testRoundTrip(CONFIG.quoteLadderLamports[1], p.mint);
+      roundTripLossPct = small.roundTripLossPct;
       p.quotes = {
-        buyOk: true,
-        sellOk: true,
-        testInputSol: Number(CONFIG.buyTestLamports) / 1e9,
-        tokenOut,
-        solBack: solBack / 1e9,
-        roundTripLossPct: round(roundTripLossPct, 2),
-        buyPriceImpactPct: buy.priceImpactPct == null ? null : toNum(buy.priceImpactPct),
-        sellPriceImpactPct: sell.priceImpactPct == null ? null : toNum(sell.priceImpactPct),
+        buyOk: small.buyOk && medium.buyOk,
+        sellOk: small.sellOk && medium.sellOk,
+        testInputSol: small.inputSol,
+        tokenOut: small.tokenOut,
+        solBack: small.solBack,
+        roundTripLossPct: small.roundTripLossPct,
+        buyPriceImpactPct: small.buyPriceImpactPct,
+        sellPriceImpactPct: small.sellPriceImpactPct,
+        quoteLadder: [small, medium],
         checkedAt: new Date().toISOString()
       };
-      state.jupiter.successCount++;
+      state.jupiter.successCount += 4;
       state.jupiter.lastError = null;
-      if (roundTripLossPct > CONFIG.maxRoundTripLossPct) risks.push("Coût aller-retour Jupiter supérieur à " + CONFIG.maxRoundTripLossPct + "%");
+      if (small.roundTripLossPct > CONFIG.maxRoundTripLossPct || medium.roundTripLossPct > CONFIG.maxRoundTripLossPct) {
+        risks.push("Coût aller-retour supérieur à " + CONFIG.maxRoundTripLossPct + "% sur la grille de cotations");
+      }
     } catch (e) {
-      p.quotes = { buyOk: Boolean(buy), sellOk: Boolean(sell), error: safeError(e), checkedAt: new Date().toISOString() };
+      p.quotes = { buyOk: Boolean(small?.buyOk || medium?.buyOk), sellOk: Boolean(small?.sellOk || medium?.sellOk), quoteLadder: [small, medium].filter(Boolean), error: safeError(e), checkedAt: new Date().toISOString() };
       state.jupiter.lastError = safeError(e);
-      risks.push("Achat/revente non confirmés par Jupiter");
+      risks.push("Grille de cotations achat/revente incomplète");
     }
   } else if (!JUPITER_API_KEY) {
     risks.push("Clé Jupiter absente : test achat/revente impossible");
+  } else {
+    risks.push("Sécurité mint non validée");
   }
 
   const total = p.buyCount + p.sellCount;
@@ -469,15 +679,22 @@ async function checkCandidate(p) {
   p.buyPressure = pressure;
   if (total < CONFIG.minSwaps) risks.push("Pas assez de swaps observés (" + total + "/" + CONFIG.minSwaps + ")");
   if (buyers < CONFIG.minBuyers) risks.push("Pas assez d'acheteurs distincts (" + buyers + "/" + CONFIG.minBuyers + ")");
-  if (pressure < CONFIG.minBuyPressure) risks.push("Pression acheteuse insuffisante");
+  if (pressure < CONFIG.minBuyPressure) risks.push("Pression acheteuse insuffisante en nombre de swaps");
+  if (p.volumeBuyPressure == null) risks.push("Pression acheteuse en volume non vérifiable");
+  else if (p.volumeBuyPressure < CONFIG.minBuyPressure) risks.push("Pression acheteuse insuffisante en volume");
 
-  const securityScore = p.security.checked && p.security.risks.length === 0 ? 30 : 0;
-  const activityScore = Math.min(20, total * 2);
-  const buyerScore = Math.min(20, buyers * 5);
-  const pressureScore = Math.round(20 * pressure);
-  const quoteScore = p.quotes.buyOk && p.quotes.sellOk && roundTripLossPct != null && roundTripLossPct <= CONFIG.maxRoundTripLossPct ? 10 : 0;
-  p.score = securityScore + activityScore + buyerScore + pressureScore + quoteScore;
-  p.eligible = risks.length === 0 && p.quotes.buyOk && p.quotes.sellOk;
+  const securityScore = p.security.checked && p.security.risks.length === 0 ? 25 : 0;
+  const activityScore = Math.min(15, total * 1.5);
+  const buyerScore = Math.min(15, buyers * 3);
+  const pressureScore = Math.round(15 * pressure);
+  const volumeScore = p.volumeBuyPressure == null ? 0 : Math.round(15 * p.volumeBuyPressure);
+  const liquidityScore = p.liquidityVerified ? 10 : 0;
+  const quoteScore = p.quotes.buyOk && p.quotes.sellOk && roundTripLossPct != null && roundTripLossPct <= CONFIG.maxRoundTripLossPct ? 5 : 0;
+  p.score = Math.round(securityScore + activityScore + buyerScore + pressureScore + volumeScore + liquidityScore + quoteScore);
+  p.eligible = risks.length === 0 && Boolean(p.poolAddress) && p.liquidityVerified &&
+    p.quotes.buyOk && p.quotes.sellOk && small && medium &&
+    small.roundTripLossPct <= CONFIG.maxRoundTripLossPct &&
+    medium.roundTripLossPct <= CONFIG.maxRoundTripLossPct;
   p.risks = [...new Set(risks)];
   p.roundTripLossPct = roundTripLossPct == null ? null : round(roundTripLossPct, 2);
   p.buyersCount = buyers;
@@ -528,7 +745,8 @@ async function processSignature(signature, dexName, slot) {
     if (!tx || !tx.meta || tx.meta.err) return;
     const swap = findSwapForSigner(tx);
     if (!swap || !swap.mint || swap.mint === SOL_MINT || swap.mint === USDC_MINT || swap.mint === USDT_MINT) return;
-    addSwap(swap.mint, swap, dexName, signature, slot || tx.slot);
+    const market = extractRaydiumCpmmMarket(tx, swap.mint);
+    addSwap(swap.mint, swap, dexName, signature, slot || tx.slot, market);
     const p = state.pools.get(swap.mint);
     if (p && !p.metadataRequested) {
       p.metadataRequested = true;
@@ -671,8 +889,13 @@ function publicCandidate(p) {
     name: p.name,
     symbol: p.symbol,
     dex: p.dex,
-    liquidity: null,
-    liquidityVerified: false,
+    liquidity: p.liquidity,
+    liquidityVerified: Boolean(p.liquidityVerified),
+    liquiditySol: p.liquiditySol,
+    estimatedLiquiditySol: p.liquiditySol,
+    quoteReserveSol: p.quoteReserveSol,
+    quoteLiquidity: p.quoteLiquidity,
+    quoteMint: p.quoteMint,
     volume: p.volume,
     volumeUsd: p.volumeUsd,
     volumeSol: round(p.volumeSol, 6),
@@ -686,6 +909,7 @@ function publicCandidate(p) {
     sellCount: p.sellCount,
     buyersCount: p.buyers.size,
     buyPressure: round(p.buyPressure * 100, 1),
+    buyPressureByVolume: p.volumeBuyPressure == null ? null : round(p.volumeBuyPressure * 100, 1),
     buyVolumeSol: round(p.buyVolumeSol, 6),
     sellVolumeSol: round(p.sellVolumeSol, 6),
     score: p.score,
@@ -765,6 +989,7 @@ app.get("/jupiter-test", async (_req, res) => {
     const quote = await jupiterOrder(SOL_MINT, USDC_MINT, "1000000000");
     state.jupiter.lastCheck = new Date().toISOString();
     state.jupiter.lastSolPriceUsd = Number(quote.outAmount) / 1e6;
+    state.jupiter.lastSolPriceAt = now();
     state.jupiter.lastError = null;
     state.jupiter.checksCount++;
     state.jupiter.successCount++;
