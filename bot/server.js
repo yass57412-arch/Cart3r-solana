@@ -2,154 +2,217 @@
 const express = require("express");
 
 const app = express();
+app.use(express.json());
+
 const PORT = process.env.PORT || 3000;
+const API = "https://api.dexscreener.com";
 
-app.use(express.json({ limit: "10kb" }));
+const MAX_POOLS = 100;
+const MAX_TOKENS_PER_SCAN = 30;
+const SCAN_INTERVAL = 60000;
+const MIN_LIQUIDITY = 3000;
+const MIN_VOLUME_1H = 500;
 
-const API = "https://api.geckoterminal.com/api/v2";
-const MAX_PAGES = 5;
-const PAGE_GAP = 8000;
-const SCAN_INTERVAL = 180000;
-
-let status = {
-  running: true,
-  mode: "TEST",
-  realTrading: false,
-  scanner: "STARTING",
-  poolsFound: 0,
-  lastUpdate: null,
-  lastError: null
-};
-
-let pools = [];
+let running = true;
 let scanning = false;
+let pools = [];
+let lastUpdate = null;
+let lastError = null;
+let scannerState = "STARTING";
+let nextScanAt = Date.now();
 let cooldownUntil = 0;
+let scanTimer = null;
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-function num(value) {
+function number(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
 
-function calculateScore(liquidity, volume, change) {
-  const l = Math.min(30, Math.log10(liquidity + 1) * 6);
-  const v = Math.min(35, Math.log10(volume + 1) * 7);
-  const m = Math.max(0, Math.min(35, 17.5 + change * 1.75));
-  return Math.round(l + v + m);
+async function apiGet(url) {
+  const response = await fetch(url, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(15000)
+  });
+
+  if (response.status === 429) {
+    cooldownUntil = Date.now() + 60000;
+    throw new Error("Limite API : pause de 60 secondes");
+  }
+
+  if (!response.ok) {
+    throw new Error("Erreur API DEX Screener : HTTP " + response.status);
+  }
+
+  return response.json();
+}
+
+function calculateScore(pool) {
+  const liquidity = number(pool.liquidity?.usd);
+  const volume = number(pool.volume?.h1);
+  const buys = number(pool.txns?.h1?.buys);
+  const sells = number(pool.txns?.h1?.sells);
+  const change = number(pool.priceChange?.h1);
+
+  let score = 0;
+
+  // Liquidité : maximum 25 points
+  score += Math.min(25, Math.log10(Math.max(1, liquidity)) * 5);
+
+  // Volume : maximum 25 points
+  score += Math.min(25, Math.log10(Math.max(1, volume)) * 5);
+
+  // Activité des transactions : maximum 20 points
+  score += Math.min(20, (buys + sells) * 0.4);
+
+  // Équilibre acheteurs / vendeurs : maximum 15 points
+  if (buys + sells > 0) {
+    score += Math.min(15, (buys / (buys + sells)) * 15);
+  }
+
+  // Momentum positif : maximum 15 points
+  if (change > 0) {
+    score += Math.min(15, change * 1.5);
+  }
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function formatPool(pool) {
+  const liquidity = number(pool.liquidity?.usd);
+  const volume = number(pool.volume?.h1);
+  const buys = number(pool.txns?.h1?.buys);
+  const sells = number(pool.txns?.h1?.sells);
+  const change = number(pool.priceChange?.h1);
+
+  return {
+    name: pool.baseToken?.name || "Inconnu",
+    symbol: pool.baseToken?.symbol || "???",
+    address: pool.baseToken?.address || "",
+    pairAddress: pool.pairAddress || "",
+    dex: pool.dexId || "Inconnu",
+    priceUsd: number(pool.priceUsd),
+    liquidity,
+    volume1h: volume,
+    volume24h: number(pool.volume?.h24),
+    buys1h: buys,
+    sells1h: sells,
+    priceChange1h: change,
+    score: calculateScore(pool),
+    url: pool.url || "",
+    eligible: liquidity >= MIN_LIQUIDITY && volume >= MIN_VOLUME_1H,
+    risk: liquidity < MIN_LIQUIDITY ? "LIQUIDITÉ FAIBLE" : "À ANALYSER"
+  };
 }
 
 async function scanPools() {
-  if (!status.running || scanning) return;
+  if (!running || scanning) return;
 
   if (Date.now() < cooldownUntil) {
-    status.scanner = "API_COOLDOWN";
+    scannerState = "COOLDOWN";
+    nextScanAt = cooldownUntil;
     return;
   }
 
   scanning = true;
-  status.scanner = "SCANNING";
-  status.lastError = null;
-
-  const collected = new Map();
+  scannerState = "SCANNING";
+  lastError = null;
 
   try {
-    for (let page = 1; page <= MAX_PAGES; page++) {
-      if (!status.running) break;
+    // Découverte des tokens récemment publiés
+    const profiles = await apiGet(
+      `${API}/token-profiles/latest/v1`
+    );
 
-      if (page > 1) await sleep(PAGE_GAP);
+    const tokens = (Array.isArray(profiles) ? profiles : [])
+      .filter(item => item.chainId === "solana" && item.tokenAddress)
+      .slice(0, MAX_TOKENS_PER_SCAN);
 
-      const url =
-        `${API}/networks/solana/new_pools` +
-        `?page=${page}&include=base_token`;
+    const found = new Map();
+    let index = 0;
 
-      const response = await fetch(url, {
-        headers: {
-          Accept: "application/json;version=20230302"
-        },
-        signal: AbortSignal.timeout(20000)
-      });
+    // Traitement limité à 5 requêtes simultanées
+    async function worker() {
+      while (index < tokens.length) {
+        const token = tokens[index++];
 
-      if (response.status === 429) {
-        cooldownUntil = Date.now() + 60000;
-        throw new Error("Limite API : pause de 60 secondes");
-      }
+        try {
+          const data = await apiGet(
+            `${API}/token-pairs/v1/solana/${token.tokenAddress}`
+          );
 
-      if (!response.ok) {
-        throw new Error(`GeckoTerminal HTTP ${response.status}`);
-      }
+          if (!Array.isArray(data)) continue;
 
-      const json = await response.json();
+          for (const pair of data) {
+            if (pair.chainId !== "solana" || !pair.pairAddress) continue;
 
-      const included = new Map(
-        (json.included || []).map(item => [
-          item.id,
-          item.attributes || {}
-        ])
-      );
+            const formatted = formatPool(pair);
 
-      for (const pool of json.data || []) {
-        const a = pool.attributes || {};
-        const baseId = pool.relationships?.base_token?.data?.id;
-        const token = included.get(baseId) || {};
+            if (formatted.liquidity <= 0) continue;
 
-        const liquidity = num(a.reserve_in_usd);
-        const volume = num(a.volume_usd?.h24);
-        const change = num(a.price_change_percentage?.h24);
-
-        const item = {
-          id: pool.id,
-          address: String(pool.id || "").replace(/^solana_/, ""),
-          name: token.name || "Token inconnu",
-          symbol: token.symbol || "???",
-          priceUsd: num(a.base_token_price_usd),
-          liquidityUsd: liquidity,
-          volume24hUsd: volume,
-          change24hPct: change,
-          buys24h: num(a.transactions?.h24?.buys),
-          sells24h: num(a.transactions?.h24?.sells),
-          createdAt: a.pool_created_at || null,
-          score: calculateScore(liquidity, volume, change)
-        };
-
-        collected.set(item.id, item);
+            found.set(formatted.pairAddress, formatted);
+          }
+        } catch (error) {
+          if (String(error.message).includes("Limite API")) {
+            throw error;
+          }
+        }
       }
     }
 
-    if (status.running && collected.size > 0) {
-      pools = [...collected.values()]
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 100);
+    await Promise.all(
+      Array.from({ length: 5 }, () => worker())
+    );
 
-      status.poolsFound = pools.length;
-      status.lastUpdate = new Date().toISOString();
-      status.scanner = "OK";
-      status.lastError = null;
-    } else if (status.running) {
-      status.scanner = "NO_DATA";
-    }
+    pools = Array.from(found.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, MAX_POOLS);
+
+    lastUpdate = new Date().toISOString();
+    lastError = null;
+    scannerState = "OK";
 
   } catch (error) {
-    status.scanner = "ERROR";
-    status.lastError = error.message;
-    console.error("CART3R scanner:", error.message);
-
+    lastError = error.message || "Erreur inconnue";
+    scannerState = "ERROR";
   } finally {
     scanning = false;
+    nextScanAt = Date.now() + SCAN_INTERVAL;
   }
 }
 
-// Page d'accueil
+function startScanner() {
+  if (scanTimer) clearInterval(scanTimer);
+
+  running = true;
+  nextScanAt = Date.now();
+
+  scanPools();
+
+  scanTimer = setInterval(() => {
+    if (running) scanPools();
+  }, SCAN_INTERVAL);
+}
+
+function stopScanner() {
+  running = false;
+
+  if (scanTimer) {
+    clearInterval(scanTimer);
+    scanTimer = null;
+  }
+
+  scannerState = "STOPPED";
+}
+
 app.get("/", (req, res) => {
   res.json({
     name: "CART3R",
     mode: "TEST",
-    message: "CART3R scanner server is online",
+    message: "Scanner DEX Screener actif",
     endpoints: ["/health", "/status", "/pools"]
   });
 });
 
-// Vérification serveur
 app.get("/health", (req, res) => {
   res.json({
     ok: true,
@@ -159,54 +222,54 @@ app.get("/health", (req, res) => {
   });
 });
 
-// État du scanner
 app.get("/status", (req, res) => {
   res.json({
-    ...status,
+    running,
+    mode: "TEST",
+    realTrading: false,
+    scanner: scannerState,
+    poolsFound: pools.length,
+    lastUpdate,
+    lastError,
     scanning,
     nextScanInSeconds: Math.max(
       0,
-      Math.ceil((cooldownUntil - Date.now()) / 1000)
+      Math.ceil((nextScanAt - Date.now()) / 1000)
     )
   });
 });
 
-// Liste des pools
 app.get("/pools", (req, res) => {
   res.json({
     mode: "TEST",
+    source: "DEX Screener",
     count: pools.length,
-    lastUpdate: status.lastUpdate,
+    lastUpdate,
     pools
   });
 });
 
-// Redémarrage du scanner
 app.post("/test/start", (req, res) => {
-  status.running = true;
-  status.scanner = "WAITING";
-  scanPools();
+  if (!running) startScanner();
 
   res.json({
     ok: true,
-    message: "Scanner de test démarré"
+    running,
+    mode: "TEST"
   });
 });
 
-// Arrêt du scanner
 app.post("/test/stop", (req, res) => {
-  status.running = false;
-  status.scanner = "STOPPED";
+  stopScanner();
 
   res.json({
     ok: true,
-    message: "Scanner arrêté"
+    running,
+    mode: "TEST"
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`CART3R TEST server listening on ${PORT}`);
-
-  scanPools();
-  setInterval(scanPools, SCAN_INTERVAL);
+  console.log(`CART3R DEX SCANNER TEST running on port ${PORT}`);
+  startScanner();
 });
