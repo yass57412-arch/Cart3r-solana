@@ -1,126 +1,86 @@
 <!doctype html>
-<html lang="fr">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#101827">
-<title>CART3R — Solana Simulator</title>
-<style>
-:root{color-scheme:dark;--bg:#0b1220;--panel:#121d2e;--line:#26364d;--muted:#9aabc2;--green:#38d996;--red:#ff7b85;--blue:#83b8ff}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#edf4ff;font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-main{max-width:900px;margin:auto;padding:20px 14px 42px}
-header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:8px 0 20px}
-h1{font-size:24px;margin:0;letter-spacing:.06em}h1 span{color:var(--green)}
-.sub,.muted,small{color:var(--muted)}.sub{margin-top:5px;font-size:13px}
-.pill{border:1px solid #27634e;color:var(--green);padding:6px 10px;border-radius:30px;font-size:12px;white-space:nowrap}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}
-.card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
-.label{font-size:12px;color:var(--muted)}.value{font-size:23px;font-weight:700;margin-top:7px}
-h2{font-size:17px;margin:0 0 12px}
-.actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
-button{background:#1e3552;color:#fff;border:1px solid #385575;padding:11px 14px;border-radius:10px;font-weight:600;font-size:14px}
-button.primary{background:#176447;border-color:#23875f}button:disabled{opacity:.55}
-#status{font-size:13px;color:var(--muted);margin:10px 0}
-.pool{padding:13px 0;border-top:1px solid var(--line)}.pool:first-child{border-top:0}
-.pooltop{display:flex;justify-content:space-between;gap:8px;align-items:start}
-.token{font-weight:700;overflow-wrap:anywhere}.dex{font-size:12px;color:var(--muted);margin-top:4px}
-.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
-.metric{background:#0c1726;padding:9px;border-radius:9px;min-width:0}
-.metric b{display:block;font-size:14px;margin-top:4px;overflow-wrap:anywhere}
-.link{color:var(--blue);text-decoration:none;font-size:12px}
-.note{font-size:12px;line-height:1.5;color:var(--muted);margin-top:14px}
-.error{color:var(--red)}footer{margin-top:18px;font-size:11px;color:var(--muted)}
-.filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0}
-.filters label{display:block;font-size:12px;color:var(--muted)}
-.filters input{width:100%;margin-top:5px;padding:11px;background:#0c1726;color:#edf4ff;border:1px solid #385575;border-radius:9px;font-size:16px}
-.filter-note{font-size:12px;color:var(--muted);line-height:1.45;margin-top:8px}
-.result-pill{display:inline-block;margin:8px 0;padding:6px 9px;border:1px solid #27634e;border-radius:20px;color:var(--green);font-size:12px}
-@media(min-width:650px){.grid{grid-template-columns:repeat(4,minmax(0,1fr))}.filters{grid-template-columns:repeat(3,minmax(0,1fr))}}
-</style>
-</head>
-<body><main>
-<header><div><h1>CART3R<span>.</span></h1><div class="sub">SOLANA MEMECOIN SCANNER · PAPER MODE</div></div><div class="pill">SIMULATION · 0 € RÉEL</div></header>
-<div class="grid">
- <div class="card"><div class="label">Capital fictif</div><div class="value" id="cash">100,00 €</div></div>
- <div class="card"><div class="label">Pools reçus</div><div class="value" id="count">—</div></div>
- <div class="card"><div class="label">Pools après filtres</div><div class="value" id="passed">—</div></div>
- <div class="card"><div class="label">Dernière actualisation</div><div class="value" id="updated" style="font-size:16px">Jamais</div></div>
-</div>
-<section class="panel">
- <h2>Filtres CART3R</h2>
- <div class="filters">
-  <label>Liquidité minimale ($)<input id="minLiquidity" type="number" min="0" step="100" value="10000"></label>
-  <label>Volume 24 h minimum ($)<input id="minVolume" type="number" min="0" step="100" value="5000"></label>
-  <label>Baisse maximale 24 h (%)<input id="maxDrop" type="number" min="0" max="100" step="1" value="10"></label>
- </div>
- <div class="actions"><button id="applyFilters">Appliquer les filtres</button></div>
- <div class="filter-note">Les filtres s'appliquent aux pools chargés. La variation 24 h est utilisée lorsqu'elle est fournie par l'API. Si elle est absente, le pool est écarté par prudence. Le score de sécurité GeckoTerminal n'est pas fourni par cette API.</div>
-</section>
-<section class="panel" style="margin-top:12px">
- <h2>Nouveaux pools Solana</h2>
- <div class="actions"><button class="primary" id="refresh">Actualiser les données</button><a class="link" href="https://www.geckoterminal.com/solana/pools" target="_blank" rel="noopener" style="align-self:center">Ouvrir GeckoTerminal ↗</a></div>
- <div id="status">Appuie sur « Actualiser les données » pour charger les pools.</div>
- <div id="filterStatus" class="result-pill" hidden></div>
- <div id="pools"></div>
-</section>
-<div class="note"><b>À savoir :</b> ce tableau de bord lit les données publiques de GeckoTerminal. Les données peuvent être retardées ou incomplètes. Les filtres ne certifient pas qu'un token est sûr. Aucun achat, vente ou connexion de portefeuille n'est effectué. Les 100 € sont fictifs et le capital n'est pas encore utilisé pour exécuter des ordres simulés.</div>
-<footer>Source : API publique GeckoTerminal · Actualisation manuelle uniquement.</footer>
-</main>
-<script>
-const API='https://api.geckoterminal.com/api/v2/networks/solana/new_pools?include=base_token,quote_token,dex';
-const $=id=>document.getElementById(id);
-let latestPools=[];
-const money=v=>{const n=Number(v);if(!Number.isFinite(n))return '—';return n>=1e6?'$'+(n/1e6).toFixed(2)+'M':n>=1e3?'$'+(n/1e3).toFixed(1)+'K':'$'+n.toFixed(2)};
-function safe(s){return String(s??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function getChange(a){
- const candidates=[a.price_change_percentage?.h24,a.price_change_percentage?.h24_percentage,a.price_change_percentage_h24];
- for(const v of candidates){const n=Number(v);if(v!==undefined&&v!==null&&Number.isFinite(n))return n;}
- return null;
-}
-function filterPools(items){
- const minL=Math.max(0,Number($('minLiquidity').value)||0);
- const minV=Math.max(0,Number($('minVolume').value)||0);
- const maxDrop=Math.min(100,Math.max(0,Number($('maxDrop').value)||0));
- return items.filter(p=>{
-  const a=p.attributes||{};
-  const liq=Number(a.reserve_in_usd);
-  const vol=Number(a.volume_usd?.h24);
-  const change=getChange(a);
-  if(!Number.isFinite(liq)||liq<minL)return false;
-  if(!Number.isFinite(vol)||vol<minV)return false;
-  if(change===null)return false;
-  if(change < -maxDrop)return false;
-  return true;
- });
-}
-function render(items){
- const selected=filterPools(items);
- $('count').textContent=items.length;
- $('passed').textContent=selected.length;
- $('filterStatus').hidden=false;
- $('filterStatus').textContent=selected.length+' pool(s) passent les filtres sur '+items.length+' reçu(s)';
- $('pools').innerHTML=selected.map(p=>{
-  const a=p.attributes||{}, name=a.name||p.id||'Pool Solana';
-  const liquidity=a.reserve_in_usd, vol=a.volume_usd?.h24, price=a.base_token_price_usd;
-  const change=getChange(a);
-  const created=a.pool_created_at?new Date(a.pool_created_at).toLocaleString('fr-FR'):'Date indisponible';
-  const addr=(p.relationships?.base_token?.data?.id||'').split('_').slice(1).join('_');
-  const url='https://www.geckoterminal.com/solana/pools/'+encodeURIComponent((p.id||'').replace(/^solana_/, ''));
-  return `<article class="pool"><div class="pooltop"><div><div class="token">${safe(name)}</div><div class="dex">${safe(created)} · Variation 24 h : ${change===null?'indisponible':change.toFixed(2)+'%'}</div></div><a class="link" href="${url}" target="_blank" rel="noopener">Voir ↗</a></div><div class="metrics"><div class="metric"><span class="label">Liquidité</span><b>${money(liquidity)}</b></div><div class="metric"><span class="label">Volume 24 h</span><b>${money(vol)}</b></div><div class="metric"><span class="label">Prix token</span><b>${price?('$'+Number(price).toPrecision(5)):'—'}</b></div></div>${addr?`<div class="dex">Adresse token : ${safe(addr.slice(0,7)+'…'+addr.slice(-5))}</div>`:''}</article>`;
- }).join('')||'<div class="muted">Aucun pool ne passe les filtres. Essaie des seuils moins stricts.</div>';
-}
-async function load(){
- const b=$('refresh');b.disabled=true;$('status').textContent='Chargement des nouveaux pools…';$('status').className='';
- try{
-  const r=await fetch(API,{headers:{'Accept':'application/json;version=20230302'}});
-  if(!r.ok)throw new Error('Réponse API : HTTP '+r.status);
-  const j=await r.json();if(!Array.isArray(j.data))throw new Error('Format de réponse inattendu');
-  latestPools=j.data;render(latestPools);
-  $('updated').textContent=new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
-  $('status').textContent='Données reçues : '+j.data.length+' pools. Actualisation manuelle.';
- }catch(e){$('status').textContent='Impossible de charger les données : '+e.message+'. Réessaie plus tard ou ouvre GeckoTerminal directement.';$('status').className='error';}
- finally{b.disabled=false;}
-}
-$('refresh').addEventListener('click',load);
-$('applyFilters').addEventListener('click',()=>{render(latestPools);$('status').textContent='Filtres appliqués aux dernières données chargées.';});
-</script></body></html>
+    <html lang="fr">
+    <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>CART3R — Solana Scanner</title>
+    <style>
+    :root{color-scheme:dark;--bg:#0b1020;--panel:#151d32;--line:#293653;--txt:#edf2ff;--muted:#9eacc8;--green:#35d39a;--red:#ff687d;--blue:#79a9ff}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:15px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:16px}
+    header{max-width:900px;margin:auto}h1{margin:4px 0;color:var(--green)}.sub{color:var(--muted);font-size:13px}
+    main{max-width:900px;margin:16px auto;display:grid;gap:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px}
+    h2{font-size:17px;margin:0 0 12px}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}input{width:100%;padding:11px;border-radius:9px;border:1px solid var(--line);background:#0c1427;color:var(--txt);font-size:16px}
+    button{border:0;border-radius:10px;padding:11px 14px;background:var(--green);color:#06140f;font-weight:700;font-size:14px;cursor:pointer;margin:8px 6px 0 0}
+    button.secondary{background:#2a3a5d;color:var(--txt)}button.sell{background:#ff8292;color:#25050a}
+    .stats{display:flex;gap:10px;flex-wrap:wrap}.stat{background:#0c1427;border:1px solid var(--line);padding:10px;border-radius:10px;flex:1;min-width:120px}.stat small{display:block;color:var(--muted)}.stat strong{font-size:19px}
+    #status{color:var(--muted);font-size:13px;margin-top:8px}.pool{border-top:1px solid var(--line);padding:12px 0}.pool:first-child{border-top:0}.pooltop{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}.token{font-weight:700}.meta{color:var(--muted);font-size:12px;margin:6px 0}.pill{display:inline-block;border:1px solid var(--line);border-radius:30px;padding:4px 8px;font-size:11px;color:var(--muted)}
+    .actions{display:flex;gap:6px;flex-wrap:wrap}.actions button{margin-top:4px}.notice{font-size:12px;color:var(--muted);line-height:1.5}
+    @media(max-width:560px){.grid{grid-template-columns:1fr}.stats{display:grid;grid-template-columns:1fr 1fr}}
+    </style>
+    </head>
+    <body>
+    <header><h1>CART3R.JAILBREAK</h1><div class="sub">Scanner Solana • Mode simulation uniquement • Aucun ordre réel</div></header>
+    <main>
+    <section class="panel">
+    <h2>Filtres de détection</h2>
+    <div class="grid">
+    <div><label for="minLiq">Liquidité minimum (USD)</label><input id="minLiq" type="number" value="10000" min="0"></div>
+    <div><label for="minVol">Volume 24 h minimum (USD)</label><input id="minVol" type="number" value="5000" min="0"></div>
+    <div><label for="maxDrop">Baisse maximum 24 h (%)</label><input id="maxDrop" type="number" value="10" min="0"></div>
+    </div>
+    <button onclick="applyFilters()">Appliquer les filtres</button><button class="secondary" onclick="loadPools()">Actualiser les données</button>
+    <div id="status">Prêt. Appuie sur « Actualiser les données ».</div>
+    </section>
+    <section class="panel">
+    <h2>Résultats des pools</h2>
+    <div class="stats">
+    <div class="stat"><small>Pools reçus</small><strong id="received">0</strong></div>
+    <div class="stat"><small>Pools retenus</small><strong id="passed">0</strong></div>
+    </div>
+    <div id="poolList" class="notice" style="margin-top:12px">Aucune donnée chargée.</div>
+    </section>
+    <section class="panel">
+    <h2>Portefeuille virtuel</h2>
+    <div class="stats">
+    <div class="stat"><small>Solde disponible</small><strong id="cash">100,00 €</strong></div>
+    <div class="stat"><small>Valeur des positions</small><strong id="positions">0,00 €</strong></div>
+    <div class="stat"><small>Valeur totale estimée</small><strong id="total">100,00 €</strong></div>
+    </div>
+    <p class="notice">Capital fictif de 100 €. Chaque achat simulé utilise 10 € par défaut. Les positions et l'historique sont conservés dans le stockage local de ce navigateur.</p>
+    <h2 style="margin-top:18px">Positions ouvertes</h2><div id="positionList" class="notice">Aucune position ouverte.</div>
+    <h2 style="margin-top:18px">Historique</h2><div id="history" class="notice">Aucune opération.</div>
+    <button class="secondary" onclick="resetWallet()">Réinitialiser la simulation</button>
+    </section>
+    <section class="panel notice">
+    <strong>Limites importantes</strong><br>
+    Les données proviennent d'un service public et peuvent être retardées, incomplètes ou limitées. La page ne fonctionne que lorsqu'elle est ouverte et actualisée. L'API utilisée ne fournit pas toujours la variation de prix 24 h : dans ce cas, le pool est écarté du filtre de baisse. Les filtres ne constituent ni une vérification de sécurité du token ni un conseil financier. Aucun achat ou vente réel n'est effectué.
+    </section>
+    </main>
+    <script>
+    const API='https://api.geckoterminal.com/api/v2/networks/solana/new_pools?include=base_token,quote_token,dex';
+    let allPools=[];
+    const euro=n=>Number(n||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+    const usd=n=>'$'+Number(n||0).toLocaleString('en-US',{maximumFractionDigits:0});
+    const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
+    function attrs(pool){return pool.attributes||{}}
+    function getChange(a){const candidates=[a.price_change_percentage?.h24,a.price_change_percentage?.h1,a.price_change_percentage_24h,a.price_change_24h];for(const x of candidates){if(x!==undefined&&x!==null&&Number.isFinite(Number(x)))return Number(x)}return null}
+    function getPools(){return allPools.map(p=>{const a=attrs(p);const rel=p.relationships||{};const includedName=(rel.base_token?.data?.id||'').split('_').pop();return {id:p.id,name:a.name||includedName||p.id,symbol:a.base_token_symbol||'',price:num(a.base_token_price_usd),liq:num(a.reserve_in_usd),vol:num(a.volume_usd?.h24),change:getChange(a),url:'https://www.geckoterminal.com/solana/pools/'+p.id.split('_').pop()}})}
+    function passing(){const minL=num(document.getElementById('minLiq').value),minV=num(document.getElementById('minVol').value),maxD=num(document.getElementById('maxDrop').value);return getPools().filter(p=>p.liq>=minL&&p.vol>=minV&&p.change!==null&&p.change>=-maxD)}
+    function applyFilters(){renderPools()}
+    async function loadPools(){const s=document.getElementById('status');s.textContent='Chargement des nouveaux pools…';try{const r=await fetch(API,{headers:{accept:'application/json'}});if(!r.ok)throw new Error('Réponse API '+r.status);const j=await r.json();allPools=j.data||[];renderPools();s.textContent='Actualisation terminée. '+allPools.length+' pool(s) reçus.'}catch(e){s.textContent='Erreur de chargement : '+e.message+'. Réessaie plus tard.'}}
+    function renderPools(){const list=document.getElementById('poolList'),good=passing();document.getElementById('received').textContent=allPools.length;document.getElementById('passed').textContent=good.length;if(!allPools.length){list.textContent='Aucune donnée chargée.';return}if(!good.length){list.textContent='Aucun pool ne passe actuellement les trois filtres. Vérifie aussi si la variation 24 h est disponible dans les données.';return}list.innerHTML=good.map((p,i)=>`<div class="pool"><div class="pooltop"><span class="token">${escapeHtml(p.name)}</span><span class="pill">Pool retenu</span></div><div class="meta">Liquidité ${usd(p.liq)} • Volume 24 h ${usd(p.vol)} • Variation ${p.change===null?'indisponible':p.change.toFixed(2)+'%'} • Prix ${p.price?('$'+p.price):'indisponible'}</div><div class="actions"><button onclick="buy(${i})" ${p.price>0?'':'disabled'}>Acheter 10 € en simulation</button><a href="${p.url}" target="_blank" rel="noopener" style="color:#9fc0ff;align-self:center">Voir le pool</a></div></div>`).join('')}
+    function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+    const KEY='cart3r_paper_wallet_v1';
+    function readWallet(){try{return JSON.parse(localStorage.getItem(KEY))||{cash:100,positions:[],history:[]}}catch{return {cash:100,positions:[],history:[]}}}
+    let wallet=readWallet();
+    function save(){localStorage.setItem(KEY,JSON.stringify(wallet));renderWallet()}
+    function buy(i){const p=passing()[i];if(!p||p.price<=0)return;const stake=10;if(wallet.cash<stake){alert('Solde virtuel insuffisant.');return}wallet.cash-=stake;const qty=stake/p.price;wallet.positions.push({name:p.name,symbol:p.symbol,price:p.price,qty,cost:stake,url:p.url});wallet.history.unshift({type:'Achat fictif',name:p.name,amount:stake,date:new Date().toLocaleString('fr-FR')});save();alert('Achat simulé enregistré : 10 € fictifs.')}
+    function sell(i){const p=wallet.positions[i];if(!p)return;const current=latestPrice(p);if(!current){alert('Prix actuel indisponible. Actualise les données avant de vendre.');return}const value=p.qty*current;wallet.cash+=value;wallet.history.unshift({type:'Vente fictive',name:p.name,amount:value,date:new Date().toLocaleString('fr-FR')});wallet.positions.splice(i,1);save()}
+    function latestPrice(pos){const match=getPools().find(p=>p.name===pos.name&&p.price>0);return match?.price||0}
+    function renderWallet(){document.getElementById('cash').textContent=euro(wallet.cash);let val=0;wallet.positions.forEach(p=>{const price=latestPrice(p)||p.price;val+=p.qty*price});document.getElementById('positions').textContent=euro(val);document.getElementById('total').textContent=euro(wallet.cash+val);const pl=document.getElementById('positionList');pl.innerHTML=wallet.positions.length?wallet.positions.map((p,i)=>{const current=latestPrice(p)||p.price;const value=p.qty*current;const pnl=value-p.cost;return `<div class="pool"><strong>${escapeHtml(p.name)}</strong><div class="meta">Mise : ${euro(p.cost)} • Valeur estimée : ${euro(value)} • Résultat : ${euro(pnl)}</div><button class="sell" onclick="sell(${i})">Vendre en simulation</button></div>`}).join(''):'Aucune position ouverte.';const h=document.getElementById('history');h.innerHTML=wallet.history.length?wallet.history.slice(0,30).map(x=>`<div class="pool"><strong>${escapeHtml(x.type)} — ${escapeHtml(x.name)}</strong><div class="meta">${euro(x.amount)} • ${escapeHtml(x.date)}</div></div>`).join(''):'Aucune opération.'}
+    function resetWallet(){if(!confirm('Effacer le portefeuille virtuel et son historique ?'))return;wallet={cash:100,positions:[],history:[]};save()}
+    renderWallet();
+    </script>
+    </body>
+    </html>
