@@ -12,6 +12,7 @@
  */
 
 const express = require("express");
+const crypto = require("crypto");
 const app = express();
 app.use(express.json({ limit: "100kb" }));
 // Public read-only CORS for the GitHub Pages dashboard.
@@ -243,9 +244,32 @@ function accountKeyObjects(tx) {
   });
 }
 
+// Anchor instruction data is base58. Decode it so pool discovery only accepts
+// the two documented CPMM swap instructions, not another 13-account instruction.
+function decodeBase58(value) {
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  let number = 0n;
+  for (const char of String(value || "")) {
+    const digit = alphabet.indexOf(char);
+    if (digit < 0) return Buffer.alloc(0);
+    number = number * 58n + BigInt(digit);
+  }
+  const bytes = [];
+  while (number > 0n) {
+    bytes.unshift(Number(number & 255n));
+    number >>= 8n;
+  }
+  const leadingZeroes = (String(value).match(/^1*/) || [""])[0].length;
+  return Buffer.concat([Buffer.alloc(leadingZeroes), Buffer.from(bytes)]);
+}
+const CPMM_SWAP_DISCRIMINATORS = new Set([
+  crypto.createHash("sha256").update("global:swap_base_input").digest().subarray(0, 8).toString("hex"),
+  crypto.createHash("sha256").update("global:swap_base_output").digest().subarray(0, 8).toString("hex")
+]);
+
 // Raydium CPMM SwapBaseInput/Output uses a documented 13-account layout:
 // [3] pool_state, [6] input_vault, [7] output_vault, [10] input_mint, [11] output_mint.
-// Only report a pool when a matching CPMM instruction is actually present.
+// Only report a pool when a matching swap discriminator and CPMM instruction are present.
 function extractRaydiumCpmmMarket(tx, mint) {
   const keys = accountKeyObjects(tx);
   const all = [
@@ -255,6 +279,8 @@ function extractRaydiumCpmmMarket(tx, mint) {
   for (const ix of all) {
     const programId = ix.programId || keys[Number(ix.programIdIndex)]?.pubkey;
     if (programId !== RAYDIUM_CPMM_PROGRAM) continue;
+    const data = decodeBase58(ix.data);
+    if (data.length < 8 || !CPMM_SWAP_DISCRIMINATORS.has(data.subarray(0, 8).toString("hex"))) continue;
     const accounts = (ix.accounts || []).map(a =>
       typeof a === "number" ? keys[a]?.pubkey : (typeof a === "string" ? a : a?.pubkey)
     );
