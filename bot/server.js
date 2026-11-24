@@ -17,20 +17,25 @@ const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
+const GECKO_BASE = "https://api.geckoterminal.com/api/v2";
+
 const CONFIG = {
   MAX_POOLS: 100,
 
-  // Jupiter : limitation volontaire des appels
+  // GECKOTERMINAL
+  GECKO_REQUEST_GAP_MS: 8000,
+  GECKO_CACHE_MS: 240000,
+  GECKO_COOLDOWN_MS: 60000,
+  GECKO_STALE_MAX_MS: 1800000,
+
+  // JUPITER
   MAX_JUPITER_CHECKS: 3,
   JUPITER_REQUEST_GAP_MS: 1500,
   JUPITER_COOLDOWN_MS: 60000,
   SOL_PRICE_CACHE_MS: 300000,
 
   SCAN_INTERVAL: 300000,
-  ADDRESSES_CACHE_MS: 1800000,
-  PAIRS_CACHE_MS: 300000,
-  DEX_COOLDOWN_MS: 300000,
-  REQUEST_TIMEOUT: 15000,
+  REQUEST_TIMEOUT: 20000,
 
   MIN_LIQUIDITY_USD: 5000,
   MIN_VOLUME_1H_USD: 1000,
@@ -42,14 +47,40 @@ const CONFIG = {
   TEST_TRADE_USD: 10,
   MAX_JUPITER_IMPACT_PCT: 5,
 
-  MAX_VOLUME_LIQUIDITY_RATIO: 10,
-
-  PROFILES_URL:
-    "https://api.dexscreener.com/token-profiles/latest/v1",
-
-  TOKENS_URL:
-    "https://api.dexscreener.com/tokens/v1/solana/"
+  MAX_VOLUME_LIQUIDITY_RATIO: 10
 };
+
+// --------------------------------------------------
+// FLUX GECKOTERMINAL
+// --------------------------------------------------
+
+const GECKO_FEEDS = [
+  {
+    name: "new_1",
+    url: GECKO_BASE +
+      "/networks/solana/new_pools?page=1&include=base_token,quote_token,dex"
+  },
+  {
+    name: "new_2",
+    url: GECKO_BASE +
+      "/networks/solana/new_pools?page=2&include=base_token,quote_token,dex"
+  },
+  {
+    name: "trending_1",
+    url: GECKO_BASE +
+      "/networks/solana/trending_pools?page=1&duration=1h&include=base_token,quote_token,dex"
+  },
+  {
+    name: "trending_2",
+    url: GECKO_BASE +
+      "/networks/solana/trending_pools?page=2&duration=1h&include=base_token,quote_token,dex"
+  },
+  {
+    name: "volume_1",
+    url: GECKO_BASE +
+      "/networks/solana/pools?page=1&sort=h24_volume_usd_desc&include=base_token,quote_token,dex"
+  }
+];
 
 // --------------------------------------------------
 // VARIABLES
@@ -63,14 +94,14 @@ let pools = [];
 let lastUpdate = null;
 let lastError = null;
 
-let dexCooldownUntil = 0;
+let geckoCooldownUntil = 0;
 let jupiterCooldownUntil = 0;
 
-let nextScanAt = Date.now();
-
-let heliusLastSlot = null;
-let heliusLastCheck = null;
-let heliusError = null;
+let geckoLastRequestAt = 0;
+let geckoLastCheck = null;
+let geckoLastError = null;
+let geckoCallsCount = 0;
+let geckoSuccessCount = 0;
 
 let jupiterLastCheck = null;
 let jupiterLastError = null;
@@ -89,15 +120,14 @@ let scanTimer = null;
 let heliusTimer = null;
 let countdownTimer = null;
 
+let nextScanAt = Date.now();
 let nextScanInSeconds = 0;
 
-let cachedAddresses = [];
-let addressesFetchedAt = 0;
+let heliusLastSlot = null;
+let heliusLastCheck = null;
+let heliusError = null;
 
-let cachedPairs = [];
-let pairsFetchedAt = 0;
-let pairsCacheKey = "";
-
+const geckoCache = new Map();
 const snapshots = new Map();
 
 // --------------------------------------------------
@@ -123,32 +153,18 @@ function shorten(value) {
   return value.slice(0, 6) + "..." + value.slice(-4);
 }
 
-function isDexCooldown() {
-  return Date.now() < dexCooldownUntil;
+function isGeckoCooldown() {
+  return Date.now() < geckoCooldownUntil;
 }
 
 function isJupiterCooldown() {
   return Date.now() < jupiterCooldownUntil;
 }
 
-function setDexCooldown() {
-  dexCooldownUntil = Math.max(
-    dexCooldownUntil,
-    Date.now() + CONFIG.DEX_COOLDOWN_MS
-  );
-}
-
-function setJupiterCooldown(ms = CONFIG.JUPITER_COOLDOWN_MS) {
-  jupiterCooldownUntil = Math.max(
-    jupiterCooldownUntil,
-    Date.now() + ms
-  );
-}
-
-function retryAfterMs(response) {
+function retryAfterMs(response, fallback) {
   const value = response.headers.get("retry-after");
 
-  if (!value) return CONFIG.JUPITER_COOLDOWN_MS;
+  if (!value) return fallback;
 
   const seconds = Number(value);
 
@@ -162,44 +178,53 @@ function retryAfterMs(response) {
     return Math.max(1000, date - Date.now());
   }
 
-  return CONFIG.JUPITER_COOLDOWN_MS;
+  return fallback;
+}
+
+function setGeckoCooldown(ms) {
+  geckoCooldownUntil = Math.max(
+    geckoCooldownUntil,
+    Date.now() + ms
+  );
+}
+
+function setJupiterCooldown(ms = CONFIG.JUPITER_COOLDOWN_MS) {
+  jupiterCooldownUntil = Math.max(
+    jupiterCooldownUntil,
+    Date.now() + ms
+  );
 }
 
 // --------------------------------------------------
-// DEX SCREENER
+// REQUÊTES HTTP
 // --------------------------------------------------
 
-async function fetchJson(url) {
+async function httpJson(url, options = {}, timeoutMs = CONFIG.REQUEST_TIMEOUT) {
   const controller = new AbortController();
 
   const timeout = setTimeout(
     () => controller.abort(),
-    CONFIG.REQUEST_TIMEOUT
+    timeoutMs
   );
 
   try {
     const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        Accept: "application/json"
-      }
+      ...options,
+      signal: controller.signal
     });
 
-    if (response.status === 429) {
-      setDexCooldown();
-
-      const error = new Error(
-        "Limite DEX Screener : pause de 300 secondes"
-      );
-
-      error.status = 429;
-      throw error;
-    }
-
     if (!response.ok) {
-      throw new Error(
-        "DEX Screener HTTP " + response.status
+      const error = new Error(
+        "HTTP " + response.status
       );
+
+      error.status = response.status;
+      error.retryAfterMs = retryAfterMs(
+        response,
+        60000
+      );
+
+      throw error;
     }
 
     return await response.json();
@@ -207,6 +232,317 @@ async function fetchJson(url) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+// --------------------------------------------------
+// GECKOTERMINAL
+// --------------------------------------------------
+
+async function geckoRequest(feed) {
+  const cached = geckoCache.get(feed.name);
+
+  // Cache frais : aucun nouvel appel.
+  if (
+    cached &&
+    Date.now() - cached.time < CONFIG.GECKO_CACHE_MS
+  ) {
+    return cached.data;
+  }
+
+  // Si l'API est en pause, on utilise les anciennes données.
+  if (isGeckoCooldown()) {
+    if (cached) return cached.data;
+
+    throw new Error("GeckoTerminal en pause");
+  }
+
+  const wait = Math.max(
+    0,
+    CONFIG.GECKO_REQUEST_GAP_MS -
+      (Date.now() - geckoLastRequestAt)
+  );
+
+  if (wait > 0) await sleep(wait);
+
+  // Une autre requête a pu déclencher un cooldown pendant l'attente.
+  if (isGeckoCooldown()) {
+    if (cached) return cached.data;
+
+    throw new Error("GeckoTerminal en pause");
+  }
+
+  geckoLastRequestAt = Date.now();
+  geckoCallsCount++;
+
+  try {
+    const data = await httpJson(
+      feed.url,
+      {
+        headers: {
+          Accept: "application/json;version=20230302"
+        }
+      }
+    );
+
+    if (!data || !Array.isArray(data.data)) {
+      throw new Error("Format GeckoTerminal invalide");
+    }
+
+    if (data.data.length > 0) {
+      geckoCache.set(feed.name, {
+        data,
+        time: Date.now()
+      });
+    }
+
+    geckoLastCheck = new Date().toISOString();
+    geckoLastError = null;
+    geckoSuccessCount++;
+
+    return data;
+
+  } catch (error) {
+    if (error.status === 429) {
+      setGeckoCooldown(
+        error.retryAfterMs || CONFIG.GECKO_COOLDOWN_MS
+      );
+
+      geckoLastError = "GeckoTerminal HTTP 429";
+    } else {
+      geckoLastError = error.message;
+    }
+
+    // Cache périmé accepté temporairement.
+    if (
+      cached &&
+      Date.now() - cached.time < CONFIG.GECKO_STALE_MAX_MS
+    ) {
+      return cached.data;
+    }
+
+    throw error;
+  }
+}
+
+// --------------------------------------------------
+// NORMALISATION DES DONNÉES GECKO
+// --------------------------------------------------
+
+function relationshipAddress(relationship) {
+  const id =
+    relationship &&
+    relationship.data &&
+    relationship.data.id;
+
+  if (!id) return null;
+
+  const separator = id.indexOf("_");
+
+  return separator >= 0
+    ? id.slice(separator + 1)
+    : id;
+}
+
+function normalizeGeckoResponse(response) {
+  const included = new Map();
+
+  for (const item of response.included || []) {
+    if (item.type === "token" && item.attributes) {
+      const address =
+        item.attributes.address ||
+        relationshipAddress({
+          data: { id: item.id }
+        });
+
+      if (address) {
+        included.set(address, {
+          address,
+          name: item.attributes.name || "Token Solana",
+          symbol: item.attributes.symbol || "UNKNOWN",
+          decimals: item.attributes.decimals
+        });
+      }
+    }
+  }
+
+  const normalized = [];
+
+  for (const item of response.data || []) {
+    if (!item.attributes) continue;
+
+    const a = item.attributes;
+    const rel = item.relationships || {};
+
+    const baseAddress =
+      relationshipAddress(rel.base_token);
+
+    const quoteAddress =
+      relationshipAddress(rel.quote_token);
+
+    if (!baseAddress || !quoteAddress) continue;
+
+    const baseInfo = included.get(baseAddress) || {
+      address: baseAddress,
+      name: "Token Solana",
+      symbol: "UNKNOWN"
+    };
+
+    const quoteInfo = included.get(quoteAddress) || {
+      address: quoteAddress,
+      name: "Token Solana",
+      symbol: "UNKNOWN"
+    };
+
+    // On évite de considérer SOL ou les stablecoins
+    // comme le memecoin à analyser.
+    const quoteMints = new Set([
+      SOL_MINT,
+      USDC_MINT,
+      "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+    ]);
+
+    let token = baseInfo;
+    let otherToken = quoteInfo;
+    let tokenPrice = num(a.base_token_price_usd);
+
+    if (
+      quoteMints.has(baseAddress) &&
+      !quoteMints.has(quoteAddress)
+    ) {
+      token = quoteInfo;
+      otherToken = baseInfo;
+      tokenPrice = num(a.quote_token_price_usd);
+    }
+
+    if (!token.address || quoteMints.has(token.address)) {
+      continue;
+    }
+
+    const createdAt = a.pool_created_at
+      ? Date.parse(a.pool_created_at)
+      : 0;
+
+    const tx = a.transactions || {};
+    const vol = a.volume_usd || {};
+    const changes = a.price_change_percentage || {};
+
+    const dexRelationship =
+      rel.dex &&
+      rel.dex.data &&
+      rel.dex.data.id;
+
+    const poolAddress = a.address;
+
+    if (!poolAddress) continue;
+
+    normalized.push({
+      chainId: "solana",
+
+      address: token.address,
+      pairAddress: poolAddress,
+
+      baseToken: token,
+      quoteToken: otherToken,
+
+      dexId: dexRelationship || "geckoterminal",
+
+      name: token.name,
+      symbol: token.symbol,
+
+      priceUsd: tokenPrice,
+
+      liquidity: {
+        usd: num(a.reserve_in_usd)
+      },
+
+      volume: {
+        m5: num(vol.m5),
+        h1: num(vol.h1),
+        h24: num(vol.h24)
+      },
+
+      txns: {
+        m5: tx.m5 || {},
+        h1: tx.h1 || {},
+        h24: tx.h24 || {}
+      },
+
+      priceChange: {
+        m5: num(changes.m5),
+        h1: num(changes.h1),
+        h24: num(changes.h24)
+      },
+
+      pairCreatedAt: Number.isFinite(createdAt)
+        ? createdAt
+        : 0,
+
+      url:
+        "https://www.geckoterminal.com/solana/pools/" +
+        poolAddress
+    });
+  }
+
+  return normalized;
+}
+
+// --------------------------------------------------
+// DÉCOUVERTE DES POOLS
+// --------------------------------------------------
+
+async function discoverPools() {
+  const allPairs = [];
+  const errors = [];
+
+  for (const feed of GECKO_FEEDS) {
+    try {
+      const response = await geckoRequest(feed);
+      const normalized = normalizeGeckoResponse(response);
+
+      allPairs.push(...normalized);
+
+    } catch (error) {
+      errors.push(feed.name + ": " + error.message);
+
+      // En cas de 429, on ne sollicite pas
+      // davantage l'API pendant le cooldown.
+      if (error.status === 429 || isGeckoCooldown()) {
+        break;
+      }
+    }
+  }
+
+  // Les résultats déjà reçus restent utilisables.
+  if (allPairs.length > 0) {
+    geckoLastError = errors.length
+      ? errors.join(" | ")
+      : null;
+
+    return allPairs;
+  }
+
+  // Si tous les flux ont échoué, on tente
+  // de conserver les données en cache.
+  for (const cached of geckoCache.values()) {
+    if (
+      Date.now() - cached.time <= CONFIG.GECKO_STALE_MAX_MS
+    ) {
+      allPairs.push(
+        ...normalizeGeckoResponse(cached.data)
+      );
+    }
+  }
+
+  if (allPairs.length > 0) {
+    geckoLastError =
+      "Utilisation du cache après indisponibilité API";
+
+    return allPairs;
+  }
+
+  throw new Error(
+    errors.join(" | ") || "Aucun pool GeckoTerminal disponible"
+  );
 }
 
 // --------------------------------------------------
@@ -218,15 +554,9 @@ async function heliusRequest(method, params = []) {
     throw new Error("HELIUS_RPC_URL non configurée");
   }
 
-  const controller = new AbortController();
-
-  const timeout = setTimeout(
-    () => controller.abort(),
-    CONFIG.REQUEST_TIMEOUT
-  );
-
-  try {
-    const response = await fetch(HELIUS_RPC_URL, {
+  const data = await httpJson(
+    HELIUS_RPC_URL,
+    {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -236,27 +566,17 @@ async function heliusRequest(method, params = []) {
         id: 1,
         method,
         params
-      }),
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      throw new Error("Helius HTTP " + response.status);
+      })
     }
+  );
 
-    const data = await response.json();
-
-    if (data.error) {
-      throw new Error(
-        data.error.message || "Erreur Helius"
-      );
-    }
-
-    return data.result;
-
-  } finally {
-    clearTimeout(timeout);
+  if (data.error) {
+    throw new Error(
+      data.error.message || "Erreur Helius"
+    );
   }
+
+  return data.result;
 }
 
 async function checkHelius() {
@@ -278,7 +598,7 @@ async function checkHelius() {
 }
 
 // --------------------------------------------------
-// SECURITE DES MINTS
+// SÉCURITÉ DES MINTS
 // --------------------------------------------------
 
 async function checkMintAuthorities(addresses) {
@@ -295,100 +615,104 @@ async function checkMintAuthorities(addresses) {
     return results;
   }
 
-  try {
-    // getMultipleAccounts accepte jusqu'à 100 comptes.
-    const response = await heliusRequest(
-      "getMultipleAccounts",
-      [
-        addresses.slice(0, 100),
-        {
-          encoding: "base64",
-          commitment: "confirmed"
-        }
-      ]
-    );
+  for (let offset = 0; offset < addresses.length; offset += 100) {
+    const group = addresses.slice(offset, offset + 100);
 
-    const accounts = response && response.value
-      ? response.value
-      : [];
+    try {
+      const response = await heliusRequest(
+        "getMultipleAccounts",
+        [
+          group,
+          {
+            encoding: "base64",
+            commitment: "confirmed"
+          }
+        ]
+      );
 
-    addresses.forEach((address, index) => {
-      const account = accounts[index];
+      const accounts = response && response.value
+        ? response.value
+        : [];
 
-      if (!account || !account.data || !account.data[0]) {
-        results.set(address, {
-          checked: false,
-          error: "Compte mint introuvable"
-        });
-        return;
-      }
+      group.forEach((address, index) => {
+        const account = accounts[index];
 
-      try {
-        const owner = account.owner;
-
-        if (
-          owner !== TOKEN_PROGRAM &&
-          owner !== TOKEN_2022_PROGRAM
-        ) {
-          throw new Error("Programme Token non reconnu");
+        if (!account || !account.data || !account.data[0]) {
+          results.set(address, {
+            checked: false,
+            error: "Compte mint introuvable"
+          });
+          return;
         }
 
-        const data = Buffer.from(
-          account.data[0],
-          "base64"
-        );
+        try {
+          const owner = account.owner;
 
-        if (data.length < 82) {
-          throw new Error("Données mint invalides");
+          if (
+            owner !== TOKEN_PROGRAM &&
+            owner !== TOKEN_2022_PROGRAM
+          ) {
+            throw new Error("Programme Token non reconnu");
+          }
+
+          const data = Buffer.from(
+            account.data[0],
+            "base64"
+          );
+
+          if (data.length < 82) {
+            throw new Error("Données mint invalides");
+          }
+
+          const mintAuthorityOption =
+            data.readUInt32LE(0);
+
+          const freezeAuthorityOption =
+            data.readUInt32LE(46);
+
+          const initialized =
+            data.readUInt8(45) === 1;
+
+          results.set(address, {
+            checked: true,
+            owner,
+
+            token2022: owner === TOKEN_2022_PROGRAM,
+
+            // Les extensions Token-2022 ne sont
+            // pas intégralement analysées ici.
+            extensionsChecked: false,
+
+            initialized,
+
+            mintAuthorityActive:
+              mintAuthorityOption !== 0,
+
+            freezeAuthorityActive:
+              freezeAuthorityOption !== 0,
+
+            decimals: data.readUInt8(44),
+
+            supply: data.readBigUInt64LE(36).toString()
+          });
+
+        } catch (error) {
+          results.set(address, {
+            checked: false,
+            error: error.message
+          });
         }
+      });
 
-        const mintAuthorityOption =
-          data.readUInt32LE(0);
+    } catch (error) {
+      heliusError = error.message;
 
-        const freezeAuthorityOption =
-          data.readUInt32LE(46);
-
-        const initialized = data.readUInt8(45) === 1;
-
-        results.set(address, {
-          checked: true,
-          owner,
-
-          token2022: owner === TOKEN_2022_PROGRAM,
-
-          // Les extensions Token-2022 ne sont pas
-          // intégralement analysées par ce contrôle.
-          extensionsChecked: false,
-
-          initialized,
-
-          mintAuthorityActive:
-            mintAuthorityOption !== 0,
-
-          freezeAuthorityActive:
-            freezeAuthorityOption !== 0,
-
-          decimals: data.readUInt8(44),
-
-          supply: data.readBigUInt64LE(36).toString()
-        });
-
-      } catch (error) {
+      for (const address of group) {
         results.set(address, {
           checked: false,
           error: error.message
         });
       }
-    });
-
-  } catch (error) {
-    heliusError = error.message;
-
-    for (const address of addresses) {
-      results.set(address, {
-        checked: false,
-        error: error.message
-      });
     }
   }
 
@@ -402,7 +726,7 @@ async function checkMintAuthorities(addresses) {
 async function waitForJupiterSlot() {
   const task = jupiterQueue.then(async () => {
     if (isJupiterCooldown()) {
-      const error = new Error("Jupiter en pause après limitation API");
+      const error = new Error("Jupiter en pause");
       error.status = 429;
       throw error;
     }
@@ -413,12 +737,10 @@ async function waitForJupiterSlot() {
         (Date.now() - jupiterRequestAt)
     );
 
-    if (wait > 0) {
-      await sleep(wait);
-    }
+    if (wait > 0) await sleep(wait);
 
     if (isJupiterCooldown()) {
-      const error = new Error("Jupiter en pause après limitation API");
+      const error = new Error("Jupiter en pause");
       error.status = 429;
       throw error;
     }
@@ -432,7 +754,7 @@ async function waitForJupiterSlot() {
 }
 
 // --------------------------------------------------
-// JUPITER SWAP V2
+// JUPITER V2
 // --------------------------------------------------
 
 async function jupiterOrder(inputMint, outputMint, amount) {
@@ -479,7 +801,10 @@ async function jupiterOrder(inputMint, outputMint, amount) {
     }
 
     if (response.status === 429) {
-      const pause = retryAfterMs(response);
+      const pause = retryAfterMs(
+        response,
+        CONFIG.JUPITER_COOLDOWN_MS
+      );
 
       setJupiterCooldown(pause);
 
@@ -513,7 +838,7 @@ async function jupiterOrder(inputMint, outputMint, amount) {
       !data.outAmount ||
       BigInt(data.outAmount) <= 0n
     ) {
-      throw new Error("Aucune quantité de sortie Jupiter");
+      throw new Error("Quantité de sortie invalide");
     }
 
     jupiterLastCheck = new Date().toISOString();
@@ -526,7 +851,7 @@ async function jupiterOrder(inputMint, outputMint, amount) {
 }
 
 // --------------------------------------------------
-// PRIX SOL AVEC CACHE
+// PRIX SOL
 // --------------------------------------------------
 
 async function getJupiterSolPrice() {
@@ -535,9 +860,7 @@ async function getJupiterSolPrice() {
     Date.now() - solPriceFetchedAt <
       CONFIG.SOL_PRICE_CACHE_MS;
 
-  if (cacheValid) {
-    return solPriceCached;
-  }
+  if (cacheValid) return solPriceCached;
 
   const quote = await jupiterOrder(
     SOL_MINT,
@@ -570,15 +893,11 @@ function getPriceImpactPercent(quote) {
       ? quote.priceImpactPct
       : quote.priceImpact;
 
-  if (raw === undefined || raw === null) {
-    return null;
-  }
+  if (raw === undefined || raw === null) return null;
 
   const value = Number(raw);
 
-  if (!Number.isFinite(value)) {
-    return null;
-  }
+  if (!Number.isFinite(value)) return null;
 
   return value <= 1
     ? Math.abs(value * 100)
@@ -586,7 +905,7 @@ function getPriceImpactPercent(quote) {
 }
 
 // --------------------------------------------------
-// TEST ACHAT + REVENTE
+// TEST ACHAT ET REVENTE
 // --------------------------------------------------
 
 async function checkJupiterSellability(pool, solPrice) {
@@ -603,8 +922,6 @@ async function checkJupiterSellability(pool, solPrice) {
       throw new Error("Montant SOL invalide");
     }
 
-    // ACHAT THEORIQUE
-
     const buy = await jupiterOrder(
       SOL_MINT,
       pool.address,
@@ -617,8 +934,6 @@ async function checkJupiterSellability(pool, solPrice) {
       throw new Error("Quantité achetable invalide");
     }
 
-    // REVENTE THEORIQUE
-
     const sell = await jupiterOrder(
       pool.address,
       SOL_MINT,
@@ -628,10 +943,7 @@ async function checkJupiterSellability(pool, solPrice) {
     const sellSol = Number(sell.outAmount) / 1e9;
     const initialSol = solAmount / 1e9;
 
-    if (
-      !Number.isFinite(sellSol) ||
-      sellSol <= 0
-    ) {
+    if (!Number.isFinite(sellSol) || sellSol <= 0) {
       throw new Error("Montant de revente invalide");
     }
 
@@ -651,23 +963,14 @@ async function checkJupiterSellability(pool, solPrice) {
       : null;
 
     if (
-      maxImpact !== null &&
+      maxImpact === null ||
       maxImpact > CONFIG.MAX_JUPITER_IMPACT_PCT
     ) {
       throw new Error(
-        "Impact excessif : " +
-        round(maxImpact, 3) + "%"
+        "Impact excessif ou indisponible : " +
+        maxImpact
       );
     }
-
-    if (maxImpact === null) {
-      throw new Error(
-        "Impact Jupiter non disponible"
-      );
-    }
-
-    // Estimation de deux frais réseau de base.
-    // Les frais prioritaires ne sont pas inclus.
 
     const estimatedNetworkFeesSol = 0.00001;
 
@@ -695,14 +998,10 @@ async function checkJupiterSellability(pool, solPrice) {
 
       buyPriceImpactPercent: round(buyImpact, 4),
       sellPriceImpactPercent: round(sellImpact, 4),
-
       maxPriceImpactPercent: round(maxImpact, 4),
 
-      roundTripReturnPercent:
-        round(returnPercent, 3),
-
-      estimatedNetReturnPercent:
-        round(netReturnPercent, 3),
+      roundTripReturnPercent: round(returnPercent, 3),
+      estimatedNetReturnPercent: round(netReturnPercent, 3),
 
       quoteOnly: true,
       executionPerformed: false
@@ -720,11 +1019,8 @@ async function checkJupiterSellability(pool, solPrice) {
 
       estimatedNetworkFeesSol,
 
-      roundTripReturnPercent:
-        round(returnPercent, 3),
-
-      estimatedNetReturnPercent:
-        round(netReturnPercent, 3),
+      roundTripReturnPercent: round(returnPercent, 3),
+      estimatedNetReturnPercent: round(netReturnPercent, 3),
 
       priorityFee: "NON INCLUSE",
       executionPerformed: false,
@@ -764,148 +1060,19 @@ async function checkJupiterSellability(pool, solPrice) {
 }
 
 // --------------------------------------------------
-// ADRESSES
-// --------------------------------------------------
-
-async function getAddresses() {
-  const cacheValid =
-    cachedAddresses.length > 0 &&
-    Date.now() - addressesFetchedAt <
-      CONFIG.ADDRESSES_CACHE_MS;
-
-  if (cacheValid) {
-    return cachedAddresses;
-  }
-
-  try {
-    const data = await fetchJson(CONFIG.PROFILES_URL);
-
-    if (!Array.isArray(data)) {
-      throw new Error("Réponse DEX invalide");
-    }
-
-    const unique = new Set();
-
-    for (const item of data) {
-      if (
-        item &&
-        item.chainId === "solana" &&
-        item.tokenAddress
-      ) {
-        unique.add(item.tokenAddress);
-      }
-
-      if (unique.size >= CONFIG.MAX_POOLS) {
-        break;
-      }
-    }
-
-    const addresses = Array.from(unique);
-
-    if (!addresses.length) {
-      throw new Error("Aucun token Solana trouvé");
-    }
-
-    cachedAddresses = addresses;
-    addressesFetchedAt = Date.now();
-
-    return cachedAddresses;
-
-  } catch (error) {
-    if (cachedAddresses.length > 0) {
-      console.log("Utilisation du cache des adresses");
-      return cachedAddresses;
-    }
-
-    throw error;
-  }
-}
-
-// --------------------------------------------------
-// PAIRES DEX
-// --------------------------------------------------
-
-async function getPairs(addresses) {
-  const key = addresses.slice().sort().join(",");
-
-  const cacheValid =
-    cachedPairs.length > 0 &&
-    pairsCacheKey === key &&
-    Date.now() - pairsFetchedAt <
-      CONFIG.PAIRS_CACHE_MS;
-
-  if (cacheValid) {
-    return cachedPairs;
-  }
-
-  try {
-    const allPairs = [];
-
-    // Maximum 30 adresses par requête.
-
-    for (let i = 0; i < addresses.length; i += 30) {
-      const group = addresses.slice(i, i + 30);
-
-      const url =
-        CONFIG.TOKENS_URL + group.join(",");
-
-      const data = await fetchJson(url);
-
-      if (Array.isArray(data)) {
-        allPairs.push(...data);
-      }
-    }
-
-    if (!allPairs.length) {
-      throw new Error("Aucune paire reçue");
-    }
-
-    cachedPairs = allPairs;
-    pairsFetchedAt = Date.now();
-    pairsCacheKey = key;
-
-    return cachedPairs;
-
-  } catch (error) {
-    if (
-      cachedPairs.length > 0 &&
-      pairsCacheKey === key
-    ) {
-      console.log("Utilisation du cache des paires");
-      return cachedPairs;
-    }
-
-    throw error;
-  }
-}
-
-// --------------------------------------------------
 // MEILLEURE PAIRE
 // --------------------------------------------------
 
 function chooseBestPair(address, pairs) {
   const matching = pairs.filter(pair => {
-    if (!pair || pair.chainId !== "solana") {
-      return false;
-    }
-
-    const base =
-      pair.baseToken && pair.baseToken.address;
-
-    const quote =
-      pair.quoteToken && pair.quoteToken.address;
-
-    return base === address || quote === address;
+    return pair && pair.address === address;
   });
 
   if (!matching.length) return null;
 
   matching.sort((a, b) => {
-    const liquidityDifference =
-      num(b.liquidity && b.liquidity.usd) -
+    return num(b.liquidity && b.liquidity.usd) -
       num(a.liquidity && a.liquidity.usd);
-
-    return liquidityDifference;
   });
 
   return matching[0];
@@ -946,10 +1113,7 @@ function analyzePool(address, pair, mint) {
   const createdAt = num(pair.pairCreatedAt);
 
   const ageMinutes = createdAt > 0
-    ? Math.max(
-        0,
-        (Date.now() - createdAt) / 60000
-      )
+    ? Math.max(0, (Date.now() - createdAt) / 60000)
     : null;
 
   const previous = snapshots.get(address);
@@ -983,17 +1147,9 @@ function analyzePool(address, pair, mint) {
   if (!mint || !mint.checked) {
     risks.push("AUTORITÉS NON VÉRIFIÉES");
   } else {
-    if (!mint.initialized) {
-      risks.push("MINT NON INITIALISÉ");
-    }
-
-    if (mint.mintAuthorityActive) {
-      risks.push("AUTORITÉ MINT ACTIVE");
-    }
-
-    if (mint.freezeAuthorityActive) {
-      risks.push("AUTORITÉ FREEZE ACTIVE");
-    }
+    if (!mint.initialized) risks.push("MINT NON INITIALISÉ");
+    if (mint.mintAuthorityActive) risks.push("AUTORITÉ MINT ACTIVE");
+    if (mint.freezeAuthorityActive) risks.push("AUTORITÉ FREEZE ACTIVE");
   }
 
   if (totalTransactions < CONFIG.MIN_TRANSACTIONS_1H) {
@@ -1024,38 +1180,18 @@ function analyzePool(address, pair, mint) {
   const momentum = num(changes.m5);
   const momentum1h = num(changes.h1);
 
-  // SCORE SUR 100
-
   let score = 0;
 
-  // Liquidité : 20 points
-
   score += Math.min(20, liquidity / 2500);
-
-  // Volume : 20 points
-
   score += Math.min(20, volume1h / 2000);
-
-  // Activité : 15 points
-
   score += Math.min(15, totalTransactions / 4);
-
-  // Pression acheteuse : 20 points
-
   score += buyRatio * 20;
-
-  // Momentum : 10 points
-
   score += Math.max(0, Math.min(10, momentum));
-
-  // Accélération du volume : 10 points
 
   score += Math.min(
     10,
     Math.max(0, acceleration - 1) * 5
   );
-
-  // Ancienneté : 5 points
 
   if (
     ageMinutes !== null &&
@@ -1064,8 +1200,6 @@ function analyzePool(address, pair, mint) {
   ) {
     score += 5;
   }
-
-  // Pénalités
 
   if (momentum < -5) score -= 5;
   if (sellRatio > 0.65) score -= 8;
@@ -1091,12 +1225,6 @@ function analyzePool(address, pair, mint) {
     authorityVerified &&
     risks.length === 0;
 
-  const token =
-    pair.baseToken &&
-    pair.baseToken.address === address
-      ? pair.baseToken
-      : pair.quoteToken;
-
   const estimatedImpact =
     liquidity > 0
       ? CONFIG.TEST_TRADE_USD / (2 * liquidity) * 100
@@ -1106,17 +1234,12 @@ function analyzePool(address, pair, mint) {
     address,
     shortAddress: shorten(address),
 
-    name: token && token.name
-      ? token.name
-      : "Token Solana",
+    name: pair.baseToken.name || "Token Solana",
+    symbol: pair.baseToken.symbol || "UNKNOWN",
 
-    symbol: token && token.symbol
-      ? token.symbol
-      : "UNKNOWN",
-
-    dex: pair.dexId || "unknown",
-    pairAddress: pair.pairAddress || null,
-    url: pair.url || null,
+    dex: pair.dexId || "geckoterminal",
+    pairAddress: pair.pairAddress,
+    url: pair.url,
 
     priceUsd: num(pair.priceUsd),
 
@@ -1186,28 +1309,27 @@ function analyzePool(address, pair, mint) {
 async function scan() {
   if (!running || scanning) return;
 
-  if (isDexCooldown()) {
-    scannerState = "COOLDOWN";
-    scheduleNextScan(
-      Math.max(1000, dexCooldownUntil - Date.now())
-    );
-    return;
-  }
-
   scanning = true;
   scannerState = "SCANNING";
 
   try {
-    const addresses = await getAddresses();
+    const pairs = await discoverPools();
 
-    const pairs = await getPairs(addresses);
+    // Un même token peut apparaître dans plusieurs flux.
+    const uniqueAddresses = Array.from(
+      new Set(pairs.map(pair => pair.address))
+    ).slice(0, CONFIG.MAX_POOLS);
+
+    if (!uniqueAddresses.length) {
+      throw new Error("Aucun token exploitable trouvé");
+    }
 
     const mintResults =
-      await checkMintAuthorities(addresses);
+      await checkMintAuthorities(uniqueAddresses);
 
     const results = [];
 
-    for (const address of addresses) {
+    for (const address of uniqueAddresses) {
       const pair = chooseBestPair(address, pairs);
 
       if (!pair) continue;
@@ -1221,15 +1343,10 @@ async function scan() {
       );
     }
 
-    // PREMIER CLASSEMENT
-
     results.sort((a, b) => b.score - a.score);
 
     jupiterChecksCount = 0;
     jupiterSuccessCount = 0;
-
-    // On ne vérifie que les meilleurs candidats
-    // qui passent déjà les contrôles fondamentaux.
 
     const candidates = results
       .filter(pool => pool.buyEligible)
@@ -1239,7 +1356,6 @@ async function scan() {
       for (const pool of candidates) {
         pool.buyEligible = false;
         pool.sellability = "JUPITER NON CONFIGURÉ";
-
         pool.jupiter = {
           verified: false,
           error: "JUPITER_API_KEY non configurée"
@@ -1259,26 +1375,21 @@ async function scan() {
 
             pool.jupiter = {
               verified: false,
-              error: "Jupiter en pause après limitation API"
+              error: "Jupiter en pause"
             };
 
-            continue;
+            break;
           }
 
           const success =
-            await checkJupiterSellability(
-              pool,
-              solPrice
-            );
-
-          // En cas de 429, on arrête immédiatement
-          // les autres vérifications Jupiter du scan.
+            await checkJupiterSellability(pool, solPrice);
 
           if (
             !success &&
             pool.jupiter &&
             pool.jupiter.error === "Jupiter HTTP 429"
           ) {
+            // Arrêt immédiat des appels Jupiter.
             break;
           }
         }
@@ -1300,8 +1411,7 @@ async function scan() {
       }
     }
 
-    // CLASSEMENT FINAL
-
+    // Classement final.
     results.sort((a, b) => {
       if (a.buyEligible !== b.buyEligible) {
         return a.buyEligible ? -1 : 1;
@@ -1314,10 +1424,12 @@ async function scan() {
 
     lastUpdate = new Date().toISOString();
     lastError = null;
-    scannerState = "OK";
 
-    // NETTOYAGE DES SNAPSHOTS
+    scannerState = geckoLastError
+      ? "DEGRADED"
+      : "OK";
 
+    // Nettoyage des snapshots.
     for (const [key, value] of snapshots.entries()) {
       if (Date.now() - value.time > 3600000) {
         snapshots.delete(key);
@@ -1327,18 +1439,18 @@ async function scan() {
   } catch (error) {
     lastError = error.message;
 
-    if (error.status === 429) {
-      setDexCooldown();
-      scannerState = "COOLDOWN";
+    if (isGeckoCooldown()) {
+      scannerState = "DEGRADED";
     } else {
       scannerState = "ERROR";
     }
 
+    // Ne jamais effacer les anciens pools valides.
   } finally {
     scanning = false;
 
     const cooldownRemaining = Math.max(
-      dexCooldownUntil - Date.now(),
+      geckoCooldownUntil - Date.now(),
       0
     );
 
@@ -1352,7 +1464,7 @@ async function scan() {
 }
 
 // --------------------------------------------------
-// PROGRAMMATION DU SCANNER
+// PROGRAMMATION
 // --------------------------------------------------
 
 function scheduleNextScan(delay) {
@@ -1373,10 +1485,12 @@ function scheduleNextScan(delay) {
 }
 
 // --------------------------------------------------
-// DEMARRAGE / ARRET
+// DÉMARRAGE / ARRÊT
 // --------------------------------------------------
 
 function startScanner() {
+  if (scanning) return;
+
   if (scanTimer) clearTimeout(scanTimer);
   if (heliusTimer) clearInterval(heliusTimer);
   if (countdownTimer) clearInterval(countdownTimer);
@@ -1394,16 +1508,10 @@ function startScanner() {
   countdownTimer = setInterval(() => {
     const now = Date.now();
 
-    if (dexCooldownUntil > now) {
-      nextScanInSeconds = Math.ceil(
-        (dexCooldownUntil - now) / 1000
-      );
-    } else {
-      nextScanInSeconds = Math.max(
-        0,
-        Math.ceil((nextScanAt - now) / 1000)
-      );
-    }
+    nextScanInSeconds = Math.max(
+      0,
+      Math.ceil((nextScanAt - now) / 1000)
+    );
   }, 1000);
 }
 
@@ -1430,6 +1538,7 @@ app.get("/", (req, res) => {
   res.json({
     name: "CART3R.JAILBREAK",
     status: "online",
+    version: "GECKO-V4",
     mode: "TEST",
     realTrading: false
   });
@@ -1439,7 +1548,8 @@ app.get("/health", (req, res) => {
   res.json({
     ok: true,
     running,
-    scanner: scannerState
+    scanner: scannerState,
+    realTrading: false
   });
 });
 
@@ -1462,6 +1572,35 @@ app.get("/status", (req, res) => {
 
     scanning,
     nextScanInSeconds,
+
+    discovery: {
+      provider: "GECKOTERMINAL",
+      configured: true,
+
+      feeds: GECKO_FEEDS.length,
+
+      callsCount: geckoCallsCount,
+      successCount: geckoSuccessCount,
+
+      lastCheck: geckoLastCheck,
+      lastError: geckoLastError,
+
+      cooldownSeconds: Math.max(
+        0,
+        Math.ceil(
+          (geckoCooldownUntil - Date.now()) / 1000
+        )
+      ),
+
+      cachedFeeds: Array.from(geckoCache.keys()),
+
+      cacheAgeSeconds: Object.fromEntries(
+        Array.from(geckoCache.entries()).map(([key, value]) => [
+          key,
+          Math.floor((Date.now() - value.time) / 1000)
+        ])
+      )
+    },
 
     helius: {
       configured: Boolean(HELIUS_RPC_URL),
@@ -1488,23 +1627,6 @@ app.get("/status", (req, res) => {
       ),
 
       lastError: jupiterLastError
-    },
-
-    cache: {
-      addresses: cachedAddresses.length,
-      pairs: cachedPairs.length,
-
-      addressesAgeSeconds: addressesFetchedAt
-        ? Math.floor(
-            (Date.now() - addressesFetchedAt) / 1000
-          )
-        : null,
-
-      pairsAgeSeconds: pairsFetchedAt
-        ? Math.floor(
-            (Date.now() - pairsFetchedAt) / 1000
-          )
-        : null
     },
 
     protections: {
@@ -1538,14 +1660,16 @@ app.get("/pools", (req, res) => {
     ok: true,
     count: pools.length,
     maxPools: CONFIG.MAX_POOLS,
+
     mode: "TEST",
     realTrading: false,
+
     pools
   });
 });
 
 // --------------------------------------------------
-// SECURITE
+// SÉCURITÉ
 // --------------------------------------------------
 
 app.get("/security", (req, res) => {
@@ -1562,6 +1686,11 @@ app.get("/security", (req, res) => {
     blockedPools: pools.filter(
       p => !p.buyEligible
     ).length,
+
+    discovery: {
+      provider: "GECKOTERMINAL",
+      lastError: geckoLastError
+    },
 
     jupiter: {
       configured: Boolean(JUPITER_API_KEY),
@@ -1611,6 +1740,36 @@ app.get("/security", (req, res) => {
 });
 
 // --------------------------------------------------
+// TEST GECKOTERMINAL
+// --------------------------------------------------
+
+app.get("/gecko-test", async (req, res) => {
+  try {
+    const response = await geckoRequest(GECKO_FEEDS[0]);
+
+    res.json({
+      ok: true,
+      provider: "GECKOTERMINAL",
+      poolsReceived: response.data.length,
+      lastCheck: geckoLastCheck,
+      cooldownSeconds: Math.max(
+        0,
+        Math.ceil(
+          (geckoCooldownUntil - Date.now()) / 1000
+        )
+      )
+    });
+
+  } catch (error) {
+    res.status(503).json({
+      ok: false,
+      provider: "GECKOTERMINAL",
+      error: error.message
+    });
+  }
+});
+
+// --------------------------------------------------
 // TEST HELIUS
 // --------------------------------------------------
 
@@ -1641,9 +1800,7 @@ app.get("/jupiter-test", async (req, res) => {
 
     const price = await getJupiterSolPrice();
 
-    jupiterLastCheck =
-      new Date().toISOString();
-
+    jupiterLastCheck = new Date().toISOString();
     jupiterLastError = null;
 
     res.json({
@@ -1669,11 +1826,13 @@ app.get("/jupiter-test", async (req, res) => {
 });
 
 // --------------------------------------------------
-// CONTROLES SCANNER
+// CONTRÔLES SCANNER
 // --------------------------------------------------
 
 app.post("/test/start", (req, res) => {
-  startScanner();
+  if (!running) {
+    startScanner();
+  }
 
   res.json({
     ok: true,
@@ -1699,8 +1858,9 @@ app.post("/test/stop", (req, res) => {
 // --------------------------------------------------
 
 app.listen(PORT, () => {
-  console.log("CART3R.JAILBREAK V3 démarré");
-  console.log("MAXIMUM 100 POOLS");
+  console.log("CART3R.JAILBREAK GECKO V4 démarré");
+  console.log("Découverte : GECKOTERMINAL");
+  console.log("Maximum : 100 pools");
 
   console.log(
     "HELIUS : " +
@@ -1713,7 +1873,7 @@ app.listen(PORT, () => {
   );
 
   console.log("MODE TEST");
-  console.log("TRADING REEL DESACTIVE");
+  console.log("TRADING RÉEL DÉSACTIVÉ");
 
   startScanner();
 });
