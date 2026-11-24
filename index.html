@@ -1,968 +1,132 @@
-
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CART3R.JAILBREAK</title>
-<script src="https://unpkg.com/@solana/web3.js@1/lib/index.iife.min.js"></script>
+<meta name="theme-color" content="#0b1020">
+<title>CART3R.JAILBREAK — Scanner TEST</title>
 <style>
-:root{color-scheme:dark;--bg:#0b1020;--panel:#151d32;--line:#293653;--txt:#edf2ff;--muted:#9eacc8;--green:#35d39a;--red:#ff687d;--purple:#c8a8ff}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--txt);font:15px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:15px}
-header,main{max-width:950px;margin:auto}
-h1{color:var(--green);margin-bottom:4px}
-h2{font-size:17px;margin:0 0 12px}
-.sub,.notice,.meta{color:var(--muted);font-size:12px;line-height:1.5}
-main{display:grid;gap:14px;margin-top:16px}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px}
-.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}
-input,select{width:100%;padding:11px;border-radius:9px;border:1px solid var(--line);background:#0c1427;color:var(--txt);font-size:16px}
-button{border:0;border-radius:10px;padding:11px 14px;background:var(--green);color:#06140f;font-weight:700;font-size:14px;cursor:pointer;margin:8px 6px 0 0}
-button.secondary{background:#2a3a5d;color:var(--txt)}
-button.sell{background:#ff8292;color:#25050a}
-button:disabled{opacity:.4;cursor:not-allowed}
-.stats{display:flex;gap:10px;flex-wrap:wrap}
-.stat{background:#0c1427;border:1px solid var(--line);padding:10px;border-radius:10px;flex:1;min-width:120px}
-.stat small{display:block;color:var(--muted)}
-.stat strong{font-size:19px}
-.diagnostic{padding:10px;background:#0c1427;border:1px solid var(--line);border-radius:9px;color:var(--muted);font-size:13px;line-height:1.5;margin-top:8px;overflow-wrap:anywhere}
-.pool{border-top:1px solid var(--line);padding:13px 0}
-.pooltop{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
-.token{font-weight:800;color:var(--green)}
+:root{color-scheme:dark;--bg:#0b1020;--panel:#151d32;--line:#293653;--txt:#edf2ff;--muted:#9eacc8;--green:#35d39a;--red:#ff687d;--amber:#ffcc80;--purple:#c8a8ff}
+*{box-sizing:border-box}body{margin:0;padding:16px;background:var(--bg);color:var(--txt);font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header,main{max-width:980px;margin:auto}h1{color:var(--green);font-size:25px;margin:4px 0}.sub,.muted{color:var(--muted);font-size:12px;line-height:1.5}
+main{display:grid;gap:14px;margin-top:18px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px}
+h2{font-size:17px;margin:0 0 12px}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.stat{background:#0c1427;border:1px solid var(--line);border-radius:10px;padding:11px;min-width:0}.stat small{display:block;color:var(--muted);font-size:11px}.stat strong{display:block;font-size:19px;margin-top:4px;overflow-wrap:anywhere}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.status{margin-top:12px;padding:11px;border-radius:9px;background:#0c1427;border:1px solid var(--line);font-size:13px;line-height:1.5;overflow-wrap:anywhere}
+.safe{color:#a8f3d5;border-color:#287c60}.warn{color:var(--amber);border-color:#805b32}.bad{color:#ffc1ca;border-color:#8c394b}
+.filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}
+input{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0c1427;color:var(--txt);font-size:16px}
+button{border:0;border-radius:9px;padding:11px 14px;background:var(--green);color:#06140f;font-weight:800;margin-top:12px}
+.pool{border-top:1px solid var(--line);padding:14px 0}.pool:first-child{border-top:0}.poolhead{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}.token{font-weight:800;color:var(--green);overflow-wrap:anywhere}
 .pill{border:1px solid var(--line);border-radius:30px;padding:4px 8px;font-size:11px;color:var(--muted)}
-.actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.actions button{margin-top:5px}
-.score{font-size:13px;font-weight:800;color:var(--green)}
-.good{color:var(--green)}.bad{color:var(--red)}.purple{color:var(--purple)}
-.real-panel{border:1px solid #805bc1;background:#201a32;border-radius:12px;padding:13px;margin:12px 0}
-.real-title{font-size:22px;font-weight:800;color:var(--purple)}
-.warning{border:1px solid #9c7040;background:#302315;padding:11px;border-radius:9px;color:#ffdda8;font-size:12px;line-height:1.5;margin:10px 0}
-.alert{border:1px solid var(--red);background:#351722;color:#ffc1ca;padding:11px;border-radius:9px;font-size:12px;line-height:1.5;margin-top:9px}
-.safe{border:1px solid #287c60;background:#102b25;color:#a8f3d5;padding:10px;border-radius:9px;font-size:12px;line-height:1.5;margin-top:9px}
-.position-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
-a{color:#79a9ff;overflow-wrap:anywhere}
-@media(max-width:560px){.grid{grid-template-columns:1fr}.stats{display:grid;grid-template-columns:1fr 1fr}}
+.details{font-size:12px;color:var(--muted);line-height:1.7;margin-top:6px;overflow-wrap:anywhere}.score{color:var(--green);font-weight:800}
+a{color:#8eb5ff;overflow-wrap:anywhere}.empty{color:var(--muted);padding:12px 0}
+@media(max-width:600px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.filters{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <header>
 <h1>CART3R.JAILBREAK</h1>
-<div class="sub">SOLANA MEMECOIN SCANNER • 100 POOLS • PHANTOM TRADING RÉEL</div>
+<div class="sub">SCANNER SOLANA • HELIUS + JUPITER • MODE TEST • ACHATS ET VENTES DÉSACTIVÉS</div>
 </header>
-
 <main>
 <section class="panel">
-<h2>Filtres du scanner</h2>
-<div class="grid">
-<div><label for="minLiq">Liquidité minimum ($)</label><input id="minLiq" type="number" value="10000" min="0"></div>
-<div><label for="minVol">Volume 24 h minimum ($)</label><input id="minVol" type="number" value="5000" min="0"></div>
-<div><label for="maxDrop">Baisse maximum 24 h (%)</label><input id="maxDrop" type="number" value="10" min="0"></div>
-</div>
-<button onclick="applyFilters()">Appliquer les filtres</button>
-<button class="secondary" onclick="loadPools()">Actualiser maintenant</button>
-<div id="status" class="diagnostic">Démarrage du scanner…</div>
-<div id="networkAlert"></div>
-</section>
-
-<section class="panel">
-<h2>Scanner des 100 pools</h2>
+<h2>État du scanner</h2>
 <div class="stats">
-<div class="stat"><small>Pools chargés</small><strong id="received">0 / 100</strong></div>
-<div class="stat"><small>Pools retenus</small><strong id="passed">0</strong></div>
+<div class="stat"><small>Mode</small><strong id="mode">TEST</strong></div>
+<div class="stat"><small>Scanner</small><strong id="scanner">—</strong></div>
+<div class="stat"><small>Pools détectés</small><strong id="poolCount">0</strong></div>
+<div class="stat"><small>Candidats éligibles</small><strong id="eligibleCount">0</strong></div>
+</div>
+<div id="status" class="status">Connexion au backend CART3R…</div>
+<div class="row"><button id="refresh">Actualiser maintenant</button><span id="updated" class="muted">En attente des données…</span></div>
+</section>
+<section class="panel">
+<h2>Filtres des candidats</h2>
+<div class="filters">
+<div><label for="minSwaps">Swaps minimum</label><input id="minSwaps" type="number" min="0" value="5"></div>
+<div><label for="minBuyers">Acheteurs distincts minimum</label><input id="minBuyers" type="number" min="0" value="2"></div>
+<div><label for="maxLoss">Perte aller-retour maximum (%)</label><input id="maxLoss" type="number" min="0" step="0.1" value="8"></div>
+</div>
+<div class="muted" style="margin-top:10px">Les filtres sont indicatifs et s'appliquent aux données observées par le backend depuis son démarrage.</div>
+</section>
+<section class="panel">
+<h2>Candidats Helius</h2>
+<div class="stats">
+<div class="stat"><small>Affichés</small><strong id="shownCount">0</strong></div>
+<div class="stat"><small>DEX observés</small><strong id="dexCount">0</strong></div>
+<div class="stat"><small>Pression acheteuse moyenne</small><strong id="avgPressure">—</strong></div>
 <div class="stat"><small>Meilleur score</small><strong id="bestScore">—</strong></div>
 </div>
-<div class="notice" style="margin-top:10px">Classement indicatif basé sur le volume, la liquidité et le momentum. Le score ne prédit pas le rendement futur.</div>
-<div id="poolList" class="notice">Chargement des pools…</div>
+<div id="poolList" class="empty">Aucun candidat chargé.</div>
 </section>
-
 <section class="panel">
-<h2>TRADING RÉEL — PHANTOM</h2>
-<div class="real-panel">
-<div class="real-title">MODE RÉEL</div>
-<div id="phantomStatus" class="diagnostic">Portefeuille Phantom non connecté.</div>
-<button onclick="connectPhantom()">Connecter Phantom</button>
-<button class="secondary" onclick="disconnectPhantom()">Déconnecter</button>
-<div class="warning">
-Les transactions sont réelles et peuvent entraîner une perte totale ou partielle des fonds. Vérifie toujours le jeton, le montant, les frais et la route dans Phantom avant de signer.
-</div>
-<label for="realAmount">Montant d'achat en SOL</label>
-<input id="realAmount" type="number" min="0.001" step="0.001" value="0.01">
-<div class="diagnostic">Le mode réel reste verrouillé au démarrage. Le déverrouillage ne signe aucune transaction.</div>
-<button id="unlockRealBtn" class="secondary" onclick="unlockRealMode()">Déverrouiller le mode réel</button>
-<div id="realLockStatus" class="diagnostic">Mode réel verrouillé.</div>
-<div id="pendingTrade" class="diagnostic">Aucun ordre en attente.</div>
-<button id="signTradeBtn" onclick="signAndExecuteTrade()" disabled>Confirmer et signer dans Phantom</button>
-<button class="secondary" onclick="cancelPendingTrade()">Annuler l'ordre préparé</button>
-</div>
-
-<h2 style="margin-top:18px">Positions réelles suivies</h2>
-<div class="notice">Stop-loss et take-profit surveillés à partir des nouveaux cours reçus. Toute vente doit être signée dans Phantom.</div>
-<div id="realPositions" class="notice">Aucune position réelle suivie.</div>
-
-<h2 style="margin-top:18px">Historique réel</h2>
-<div id="realHistory" class="notice">Aucune transaction enregistrée.</div>
-</section>
-
-<section class="panel">
-<h2>Diagnostic de sécurité</h2>
-<div id="diagnostics" class="diagnostic">En attente des premières données.</div>
-<div id="positionDiagnostics" class="diagnostic">Surveillance des positions en attente.</div>
-</section>
-
-<section class="panel notice">
-<strong>À savoir</strong><br>
-CART3R fonctionne uniquement lorsque la page reste ouverte et active. Une coupure réseau, une suspension de l'iPhone ou une route de vente indisponible peut empêcher la préparation d'une vente. Les cours et les seuils sont indicatifs : aucun stop-loss ne garantit un prix de sortie.
+<h2>Protection et limites</h2>
+<div class="status safe">MODE TEST CONFIRMÉ : aucun achat, aucune vente et aucune signature Phantom ne sont possibles depuis cette interface.</div>
+<div class="status warn">La liquidité exacte n'est pas vérifiée par le backend. Une cotation Jupiter aller-retour indique seulement qu'une route de cotation existe à cet instant ; elle ne garantit ni l'exécution ni le prix de revente.</div>
+<div id="diagnostics" class="details">Diagnostic en attente.</div>
 </section>
 </main>
-
 <script>
-const API='https://api.geckoterminal.com/api/v2/networks/solana/new_pools?include=base_token,quote_token,dex';
-const JUP='https://api.jup.ag/swap/v2';
-const RPC='https://api.mainnet-beta.solana.com';
-const SOL_MINT='So11111111111111111111111111111111111111112';
-const REAL_POS_KEY='cart3r_real_positions_v2';
-const REAL_KEY='cart3r_real_history_v2';
-
-const MAX_POOLS=100;
-const DEFAULT_SL=-10;
-const DEFAULT_TP=25;
-
-/* PROTECTION RÉSEAU */
-const GECKO_MIN_GAP=8000;
-const SCAN_INTERVAL=15000;
-const POSITION_INTERVAL=60000;
-const SCANNER_STALE_MS=45000;
-const POSITION_STALE_MS=120000;
-
-let allPools=[];
-let poolPages={};
-let pageNumber=1;
-let loading=false;
-let timer=null;
-let positionTimer=null;
-let positionBusy=false;
-let positionIndex=0;
-
-let geckoQueue=Promise.resolve();
-let geckoNextAllowedAt=0;
-let geckoBlockedUntil=0;
-
-let lastScannerSuccessAt=0;
-let lastPositionSuccessAt=0;
-let lastJupiterOrderAt=0;
-
-let phantomProvider=null;
-let phantomAddress=null;
-let liveUnlocked=false;
-let pendingTrade=null;
-let realBusy=false;
-
-let realPositions=readStorage(REAL_POS_KEY,[]);
-let realHistory=readStorage(REAL_KEY,[]);
-
-function readStorage(key,fallback){
- try{
-  const v=JSON.parse(localStorage.getItem(key));
-  return Array.isArray(v)?v:fallback;
- }catch(e){return fallback}
+'use strict';
+const API='https://cart3r-solana.onrender.com';
+let statusData=null,poolsData=[],busy=false;
+const $=id=>document.getElementById(id);
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function n(v){const x=Number(v);return Number.isFinite(x)?x:0;}
+function pct(v){return v==null?'—':n(v).toFixed(1)+' %';}
+function age(v){if(!v)return 'jamais';const ms=Date.now()-new Date(v).getTime();if(!Number.isFinite(ms))return 'inconnue';return Math.max(0,Math.floor(ms/1000))+' s';}
+function filtered(){
+ const swaps=Math.max(0,n($('minSwaps').value)),buyers=Math.max(0,n($('minBuyers').value)),loss=Math.max(0,n($('maxLoss').value));
+ return poolsData.filter(p=>n(p.activityCount)>=swaps&&n(p.buyersCount)>=buyers&&p.roundTripLossPct!=null&&n(p.roundTripLossPct)<=loss&&p.eligible===true&&Array.isArray(p.risks)&&p.risks.length===0)
+ .sort((a,b)=>n(b.score)-n(a.score)||n(b.activityCount)-n(a.activityCount));
 }
-function saveRealData(){
- try{
-  localStorage.setItem(REAL_POS_KEY,JSON.stringify(realPositions));
-  localStorage.setItem(REAL_KEY,JSON.stringify(realHistory.slice(0,100)));
- }catch(e){
-  console.warn('Sauvegarde locale impossible',e);
- }
-}
-function num(v){
- const n=Number(v);
- return Number.isFinite(n)?n:0;
-}
-function usd(v){
- return '$'+num(v).toLocaleString('en-US',{maximumFractionDigits:0});
-}
-function escapeHtml(s){
- return String(s??'').replace(/[&<>"']/g,c=>({
-  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
- }[c]));
-}
-function shortAddress(s){
- return s?String(s).slice(0,5)+'…'+String(s).slice(-5):'';
-}
-function attrs(pool){return pool.attributes||{}}
-function ageText(timestamp){
- if(!timestamp)return 'jamais';
- const seconds=Math.max(0,Math.floor((Date.now()-timestamp)/1000));
- if(seconds<60)return seconds+' s';
- return Math.floor(seconds/60)+' min';
-}
-
-/* FILE D'ATTENTE COMMUNE POUR TOUTES LES REQUÊTES GECKOTERMINAL */
-function geckoFetchJson(url){
- const task=geckoQueue.then(async()=>{
-  const wait=Math.max(
-   0,
-   geckoNextAllowedAt-Date.now(),
-   geckoBlockedUntil-Date.now()
-  );
-  if(wait)await new Promise(resolve=>setTimeout(resolve,wait));
-
-  const controller=new AbortController();
-  const timeout=setTimeout(()=>controller.abort(),15000);
-
-  try{
-   const response=await fetch(url,{
-    headers:{accept:'application/json','accept-version':'20230302'},
-    signal:controller.signal
-   });
-
-   geckoNextAllowedAt=Date.now()+GECKO_MIN_GAP;
-
-   if(response.status===429){
-    geckoBlockedUntil=Date.now()+60000;
-    throw new Error('API temporairement limitée (429). Pause de 60 secondes.');
-   }
-   if(response.status===503||response.status===502){
-    geckoBlockedUntil=Date.now()+30000;
-    throw new Error('API temporairement indisponible. Pause de 30 secondes.');
-   }
-   if(!response.ok)throw new Error('HTTP '+response.status);
-
-   return await response.json();
-  }finally{
-   clearTimeout(timeout);
-  }
- });
-
- geckoQueue=task.catch(()=>{});
- return task;
-}
-
-async function fetchJson(url){
- return geckoFetchJson(url);
-}
-
-function getChange(a){
- const values=[
-  a.price_change_percentage?.h24,
-  a.price_change_percentage?.h1,
-  a.price_change_percentage_24h,
-  a.price_change_24h
- ];
- for(const x of values){
-  if(x!==undefined&&x!==null&&Number.isFinite(Number(x)))return Number(x);
- }
- return null;
-}
-
-function mapPool(p){
- const a=attrs(p);
- const rel=p.relationships||{};
- const mint=(rel.base_token?.data?.id||'').split('_').pop();
- const address=String(p.id||'').split('_').pop();
- return {
-  id:p.id,
-  address,
-  mint,
-  name:a.name||a.base_token_symbol||shortAddress(mint),
-  symbol:a.base_token_symbol||'',
-  price:num(a.base_token_price_usd),
-  liq:num(a.reserve_in_usd),
-  vol:num(a.volume_usd?.h24),
-  change:getChange(a),
-  url:'https://www.geckoterminal.com/solana/pools/'+address
- };
-}
-
-function scorePool(p){
- const liq=p.liq;
- const vol=p.vol;
- const change=p.change??0;
- const ratio=liq>0?vol/liq:0;
- let score=35;
-
- if(liq>=100000)score+=18;
- else if(liq>=50000)score+=14;
- else if(liq>=20000)score+=9;
- else if(liq>=10000)score+=4;
-
- if(vol>=500000)score+=20;
- else if(vol>=100000)score+=16;
- else if(vol>=50000)score+=12;
- else if(vol>=10000)score+=7;
- else if(vol>=5000)score+=3;
-
- if(ratio>=3)score+=12;
- else if(ratio>=1)score+=9;
- else if(ratio>=0.5)score+=6;
- else if(ratio>=0.2)score+=3;
-
- if(change>0&&change<=20)score+=10;
- else if(change>20&&change<=50)score+=6;
- else if(change>50)score-=8;
- else if(change< -20)score-=15;
- else if(change<0)score-=5;
-
- return Math.max(1,Math.min(99,Math.round(score)));
-}
-
-function verdict(p){
- if(p.liq<10000||p.vol<5000||p.change===null)return 'ÉVITER';
- if(p.score>=75)return 'À ÉTUDIER';
- if(p.score>=55)return 'SURVEILLER';
- return 'PRUDENCE';
-}
-
-function passing(){
- const minL=num(document.getElementById('minLiq').value);
- const minV=num(document.getElementById('minVol').value);
- const maxD=num(document.getElementById('maxDrop').value);
-
- return allPools
-  .filter(p=>p.liq>=minL&&p.vol>=minV&&p.change!==null&&p.change>=-maxD)
-  .sort((a,b)=>b.score-a.score);
-}
-function applyFilters(){renderPools()}
-
-function scannerIsFresh(){
- return lastScannerSuccessAt>0&&Date.now()-lastScannerSuccessAt<=SCANNER_STALE_MS;
-}
-
-function renderPools(){
- const list=document.getElementById('poolList');
- const good=passing();
-
- document.getElementById('received').textContent=allPools.length+' / '+MAX_POOLS;
- document.getElementById('passed').textContent=good.length;
- document.getElementById('bestScore').textContent=good.length?good[0].score+' / 100':'—';
-
- if(!allPools.length){
-  list.textContent='Aucune donnée chargée.';
-  return;
- }
- if(!good.length){
-  list.textContent='Aucun pool ne passe les filtres actuels.';
-  return;
- }
-
- list.innerHTML=good.map(p=>{
-  const opinion=verdict(p);
-  const color=p.score>=75?'good':p.score>=55?'purple':'bad';
-  const change=p.change===null?'indisponible':(p.change>0?'+':'')+p.change.toFixed(2)+' %';
-
-  return `
-  <div class="pool">
-   <div class="pooltop">
-    <span class="token">${escapeHtml(p.name)} ${p.symbol?'('+escapeHtml(p.symbol)+')':''}</span>
-    <span class="pill">${opinion}</span>
-   </div>
-   <div class="meta">Score du setup : <span class="score ${color}">${p.score} / 100</span></div>
-   <div class="meta">Liquidité : ${usd(p.liq)} • Volume 24 h : ${usd(p.vol)}</div>
-   <div class="meta">Variation 24 h : ${change} • Prix : ${p.price?'$'+p.price:'indisponible'}</div>
-   <div class="meta">Analyse : ${analysisText(p)}</div>
-   <div class="actions">
-    <button ${scannerIsFresh()?'':'disabled'} onclick="prepareRealBuy('${encodeURIComponent(p.id)}')">Acheter avec Phantom</button>
-    <a href="${p.url}" target="_blank" rel="noopener">Voir le pool</a>
-   </div>
-  </div>`;
+function render(){
+ const items=filtered();
+ $('poolCount').textContent=statusData?.poolsFound??poolsData.length;
+ $('eligibleCount').textContent=statusData?.eligiblePools??poolsData.filter(p=>p.eligible).length;
+ $('shownCount').textContent=items.length;
+ $('dexCount').textContent=new Set(items.map(p=>p.dex).filter(Boolean)).size;
+ $('avgPressure').textContent=items.length?pct(items.reduce((s,p)=>s+n(p.buyPressure),0)/items.length):'—';
+ $('bestScore').textContent=items.length?n(items[0].score)+' / 100':'—';
+ if(!items.length){$('poolList').innerHTML='<div class="empty">Aucun candidat ne satisfait actuellement tous les filtres. Cela ne signifie pas qu’aucun token ne se négocie.</div>';return;}
+ $('poolList').innerHTML=items.map(p=>{
+  const quote=p.quotes||{},security=p.security||{},risks=Array.isArray(p.risks)?p.risks:[];
+  const quoteText=quote.buyOk&&quote.sellOk?'Achat et revente cotés':(quote.error||'Cotation indisponible');
+  const riskText=risks.length?risks.join(' • '):'Aucun risque détecté par les contrôles effectués';
+  const addr=p.mint||p.address||'';
+  return '<article class="pool"><div class="poolhead"><span class="token">'+esc(p.name||p.symbol||'Token inconnu')+' '+(p.symbol?'('+esc(p.symbol)+')':'')+'</span><span class="pill">Score '+n(p.score)+'/100</span></div>'+
+   '<div class="details">DEX : '+esc(p.dex||'inconnu')+' • Activité observée : '+n(p.activityCount)+' swaps sur 15 min • Acheteurs : '+n(p.buyersCount)+'</div>'+
+   '<div class="details">Pression acheteuse : '+pct(p.buyPressure)+' • Achats : '+n(p.buyCount)+' • Ventes : '+n(p.sellCount)+'</div>'+
+   '<div class="details">Test Jupiter : '+esc(quoteText)+' • Perte aller-retour estimée : '+pct(p.roundTripLossPct)+'</div>'+
+   '<div class="details">Sécurité mint : '+(security.checked?'contrôlée':'non vérifiée')+' • Liquidité : non vérifiée</div>'+
+   '<div class="details">Contrôles : '+esc(riskText)+'</div>'+
+   '<div class="details">Adresse : <a href="https://solscan.io/token/'+encodeURIComponent(addr)+'" target="_blank" rel="noopener noreferrer">'+esc(addr)+'</a></div></article>';
  }).join('');
 }
-
-function analysisText(p){
- const reasons=[];
- if(p.liq>=50000)reasons.push('liquidité intéressante');
- else reasons.push('liquidité limitée');
- if(p.vol>=50000)reasons.push('volume actif');
- else reasons.push('volume modéré');
- if(p.change>0&&p.change<=30)reasons.push('momentum positif');
- else if(p.change>30)reasons.push('hausse déjà importante');
- else reasons.push('momentum faible ou négatif');
- return reasons.join(' • ')+'.';
-}
-
-function updateNetworkDisplay(){
- const alert=document.getElementById('networkAlert');
- const age=lastScannerSuccessAt?Date.now()-lastScannerSuccessAt:Infinity;
-
- if(age>SCANNER_STALE_MS){
-  alert.innerHTML='<div class="alert">ALERTE : les cours du scanner ne sont plus à jour. Les achats sont bloqués. Dernière donnée reçue : '+ageText(lastScannerSuccessAt)+'.</div>';
- }else{
-  alert.innerHTML='<div class="safe">Données du scanner récentes • Dernière réception il y a '+ageText(lastScannerSuccessAt)+'.</div>';
- }
- renderPools();
-}
-
-function getPhantom(){
- return window.phantom?.solana||(window.solana?.isPhantom?window.solana:null);
-}
-function realStatus(message){
- document.getElementById('phantomStatus').textContent=message;
-}
-function renderRealLock(){
- document.getElementById('realLockStatus').textContent=liveUnlocked?
- 'MODE RÉEL DÉVERROUILLÉ — chaque transaction nécessite une signature Phantom.':
- 'Mode réel verrouillé.';
-}
-async function connectPhantom(){
+async function load(){
+ if(busy)return;busy=true;$('refresh').disabled=true;
  try{
-  const provider=getPhantom();
-  if(!provider){
-   realStatus('Phantom introuvable. Ouvre CART3R depuis le navigateur intégré de Phantom.');
-   return;
-  }
-  phantomProvider=provider;
-  const response=await provider.connect();
-  phantomAddress=response?.publicKey?.toString()||provider.publicKey?.toString();
-  if(!phantomAddress)throw new Error('Adresse du portefeuille non reçue.');
-  realStatus('Connecté : '+phantomAddress);
-  renderRealPositions();
+  const [sr,pr]=await Promise.all([fetch(API+'/status',{cache:'no-store'}),fetch(API+'/pools',{cache:'no-store'})]);
+  if(!sr.ok)throw new Error('Status HTTP '+sr.status);
+  if(!pr.ok)throw new Error('Pools HTTP '+pr.status);
+  const s=await sr.json(),p=await pr.json();
+  if(s.realTrading!==false||s.mode!=='TEST'||p.realTrading!==false)throw new Error('Le backend ne confirme pas le mode TEST : affichage bloqué.');
+  statusData=s;poolsData=Array.isArray(p.pools)?p.pools:[];
+  $('mode').textContent=s.mode;$('scanner').textContent=s.scanner||'—';
+  $('status').className='status '+(s.running&&s.helius?.connected?'safe':'warn');
+  $('status').textContent='Backend : '+(s.running?'actif':'arrêté')+' • Helius : '+(s.helius?.connected?'connecté':'non connecté')+' • Jupiter : '+(s.jupiter?.configured?'configuré':'non configuré')+' • Dernière activité : '+age(s.lastUpdate)+'.';
+  $('updated').textContent='Actualisé à '+new Date().toLocaleTimeString('fr-FR');
+  $('diagnostics').textContent='Dernière erreur scanner : '+(s.lastError||'aucune')+' • Erreur Helius : '+(s.helius?.lastError||'aucune')+' • Erreur Jupiter : '+(s.jupiter?.lastError||'aucune')+'. Les données sont limitées à ce que le backend a observé depuis son démarrage.';
+  render();
  }catch(e){
-  realStatus('Connexion impossible : '+(e.message||e));
- }
+  $('status').className='status bad';$('status').textContent='Connexion au backend impossible : '+(e.message||e);
+  $('diagnostics').textContent='Vérifie que le service Render est démarré et que le déploiement est terminé. Les données ne sont pas présentées comme à jour.';
+ }finally{busy=false;$('refresh').disabled=false;}
 }
-async function disconnectPhantom(){
- try{if(phantomProvider?.disconnect)await phantomProvider.disconnect()}catch(e){}
- phantomProvider=null;
- phantomAddress=null;
- liveUnlocked=false;
- pendingTrade=null;
- document.getElementById('signTradeBtn').disabled=true;
- document.getElementById('pendingTrade').textContent='Aucun ordre en attente.';
- realStatus('Portefeuille déconnecté.');
- renderRealLock();
- renderRealPositions();
-}
-function unlockRealMode(){
- if(!phantomAddress){alert('Connecte d’abord Phantom.');return}
- if(!confirm('Activer le trading réel ? Une transaction signée peut entraîner une perte définitive de tes fonds.'))return;
- liveUnlocked=true;
- renderRealLock();
-}
-function cancelPendingTrade(){
- pendingTrade=null;
- document.getElementById('pendingTrade').textContent='Ordre préparé annulé.';
- document.getElementById('signTradeBtn').disabled=true;
-}
-function toBase64(bytes){
- let binary='';
- for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);
- return btoa(binary);
-}
-function fromBase64(value){
- const binary=atob(value);
- const bytes=new Uint8Array(binary.length);
- for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
- return bytes;
-}
-async function rpc(method,params){
- const response=await fetch(RPC,{
-  method:'POST',
-  headers:{'Content-Type':'application/json'},
-  body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})
- });
- if(!response.ok)throw new Error('Erreur RPC HTTP '+response.status);
- const data=await response.json();
- if(data.error)throw new Error(data.error.message||'Erreur RPC');
- return data.result;
-}
-async function jupiterOrder(inputMint,outputMint,amount){
- const wait=Math.max(0,2200-(Date.now()-lastJupiterOrderAt));
- if(wait)await new Promise(resolve=>setTimeout(resolve,wait));
- lastJupiterOrderAt=Date.now();
-
- const params=new URLSearchParams({
-  inputMint,
-  outputMint,
-  amount:String(amount),
-  taker:phantomAddress,
-  maxSupportedTransactionVersion:'0'
- });
- const response=await fetch(JUP+'/order?'+params.toString(),{
-  headers:{accept:'application/json'}
- });
- const data=await response.json();
- if(!response.ok)throw new Error(data.error||data.errorMessage||('Jupiter HTTP '+response.status));
- if(!data.transaction)throw new Error(data.errorMessage||'Jupiter ne peut pas construire cet ordre.');
- if(!data.requestId)throw new Error('Identifiant d’ordre Jupiter manquant.');
- return data;
-}
-
-async function prepareRealBuy(encodedId){
- if(!liveUnlocked){alert('Connecte Phantom et déverrouille le mode réel.');return}
- if(realBusy)return;
-
- if(!scannerIsFresh()){
-  alert('ACHAT BLOQUÉ : les cours du scanner ne sont pas suffisamment récents. Attends une actualisation réussie.');
-  updateNetworkDisplay();
-  return;
- }
-
- const p=allPools.find(x=>x.id===decodeURIComponent(encodedId));
- if(!p||!p.mint){alert('Adresse du jeton introuvable.');return}
- if(!(p.price>0)){alert('Prix du jeton indisponible. Achat suspendu.');return}
- if(realPositions.some(x=>x.mint===p.mint)){
-  alert('Cette position est déjà suivie dans CART3R.');
-  return;
- }
-
- const amountSol=Number(document.getElementById('realAmount').value);
- if(!Number.isFinite(amountSol)||amountSol<0.001){
-  alert('Montant invalide. Minimum de cette interface : 0,001 SOL.');
-  return;
- }
- if(!window.solanaWeb3?.VersionedTransaction){
-  alert('Bibliothèque Solana indisponible. Recharge la page.');
-  return;
- }
-
- realBusy=true;
- document.getElementById('pendingTrade').textContent='Préparation de l’achat auprès de Jupiter…';
- document.getElementById('signTradeBtn').disabled=true;
-
- try{
-  const order=await jupiterOrder(SOL_MINT,p.mint,Math.round(amountSol*1e9));
-  const supply=await rpc('getTokenSupply',[p.mint]);
-  const decimals=Number(supply?.value?.decimals??0);
-  const output=Number(order.outAmount)/Math.pow(10,decimals);
-
-  pendingTrade={
-   type:'buy',
-   mint:p.mint,
-   name:p.name||p.symbol||p.mint,
-   symbol:p.symbol||'',
-   order,
-   amountSol,
-   output,
-   decimals,
-   entryPrice:p.price,
-   poolId:p.address
-  };
-
-  document.getElementById('pendingTrade').textContent=
-   'ACHAT À CONFIRMER — '+pendingTrade.name+
-   ' • Dépense : '+amountSol+' SOL • Sortie estimée : '+
-   output.toLocaleString('fr-FR',{maximumFractionDigits:8})+
-   ' '+(p.symbol||'jetons')+
-   ' • Prix de référence indicatif : $'+p.price+
-   '. Vérifie la transaction dans Phantom.';
-  document.getElementById('signTradeBtn').disabled=false;
- }catch(e){
-  pendingTrade=null;
-  document.getElementById('pendingTrade').textContent='Erreur de préparation : '+(e.message||e);
- }finally{
-  realBusy=false;
- }
-}
-
-async function getTokenBalance(mint){
- const result=await rpc('getTokenAccountsByOwner',[
-  phantomAddress,{mint},{encoding:'jsonParsed'}
- ]);
- let total=0n;
- for(const item of (result?.value||[])){
-  const amount=item?.account?.data?.parsed?.info?.tokenAmount?.amount;
-  if(amount)total+=BigInt(amount);
- }
- return total.toString();
-}
-
-async function prepareRealSell(mint,encodedName,automatic=false){
- if(!liveUnlocked){
-  if(!automatic)alert('Le mode réel est verrouillé.');
-  return;
- }
- if(!phantomAddress||realBusy)return;
-
- const position=realPositions.find(x=>x.mint===mint);
- if(!position)return;
-
- realBusy=true;
- document.getElementById('pendingTrade').textContent=automatic?
- 'Seuil atteint : préparation de la vente…':
- 'Lecture du solde du jeton…';
- document.getElementById('signTradeBtn').disabled=true;
-
- try{
-  const rawAmount=await getTokenBalance(mint);
-  if(BigInt(rawAmount)<=0n)throw new Error('Aucun solde disponible pour ce jeton.');
-
-  const order=await jupiterOrder(mint,SOL_MINT,rawAmount);
-  const name=decodeURIComponent(encodedName||position.name||mint);
-  const solEstimate=Number(order.outAmount)/1e9;
-
-  pendingTrade={
-   type:'sell',
-   mint,
-   name,
-   order,
-   rawAmount,
-   solEstimate,
-   automatic
-  };
-
-  document.getElementById('pendingTrade').textContent=
-   (automatic?'SEUIL ATTEINT — VENTE PRÉPARÉE. ':'VENTE À CONFIRMER — ')+
-   name+' • Sortie estimée : '+solEstimate.toFixed(6)+' SOL'+
-   ' • Solde entier détecté. Signe uniquement après vérification dans Phantom.';
-  document.getElementById('signTradeBtn').disabled=false;
-
-  position.autoPending=true;
-  position.autoPendingAt=Date.now();
-  position.priceStatus='seuil atteint : vente préparée, signature requise';
-  saveRealData();
- }catch(e){
-  position.autoPending=false;
-  position.lastSellError=Date.now();
-  position.priceStatus='vente non préparée : '+(e.message||e);
-  saveRealData();
-  document.getElementById('pendingTrade').textContent=
-   'Préparation de vente impossible : '+(e.message||e)+
-   '. La position reste suivie. Vérifie-la manuellement.';
- }finally{
-  realBusy=false;
-  renderRealPositions();
- }
-}
-
-async function signAndExecuteTrade(){
- if(!liveUnlocked||!phantomAddress||!pendingTrade||realBusy)return;
-
- const provider=getPhantom();
- if(!provider){alert('Phantom introuvable.');return}
- if(!window.solanaWeb3?.VersionedTransaction){alert('Bibliothèque Solana indisponible.');return}
-
- realBusy=true;
- document.getElementById('signTradeBtn').disabled=true;
- document.getElementById('pendingTrade').textContent='Ouverture de la demande de signature Phantom…';
-
- try{
-  const currentAddress=provider.publicKey?.toString();
-  if(currentAddress&&currentAddress!==phantomAddress){
-   throw new Error('Le compte Phantom a changé. Reconnecte le bon compte.');
-  }
-
-  const trade=pendingTrade;
-  const transaction=window.solanaWeb3.VersionedTransaction.deserialize(
-   fromBase64(trade.order.transaction)
-  );
-
-  if(typeof provider.signTransaction!=='function'){
-   throw new Error('Cette version de Phantom ne propose pas la signature requise.');
-  }
-
-  const signed=await provider.signTransaction(transaction);
-  const signedTransaction=toBase64(signed.serialize());
-
-  document.getElementById('pendingTrade').textContent='Transaction signée. Envoi à Jupiter…';
-
-  const response=await fetch(JUP+'/execute',{
-   method:'POST',
-   headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({
-    signedTransaction,
-    requestId:trade.order.requestId
-   })
-  });
-  const result=await response.json();
-
-  if(!response.ok)throw new Error(result.error||result.errorMessage||'Erreur Jupiter.');
-  if(result.status!=='Success'){
-   throw new Error(result.error||('Transaction non confirmée : '+result.code));
-  }
-
-  const signature=result.signature||'';
-  const record={
-   type:trade.type==='buy'?'ACHAT RÉEL':'VENTE RÉELLE',
-   name:trade.name,
-   mint:trade.mint,
-   signature,
-   date:new Date().toLocaleString('fr-FR'),
-   amount:trade.type==='buy'?trade.amountSol:trade.solEstimate
-  };
-
-  realHistory.unshift(record);
-
-  if(trade.type==='buy'){
-   realPositions.unshift({
-    mint:trade.mint,
-    name:trade.name,
-    symbol:trade.symbol||'',
-    date:record.date,
-    poolId:trade.poolId||'',
-    entryPrice:trade.entryPrice||0,
-    stopLoss:DEFAULT_SL,
-    takeProfit:DEFAULT_TP,
-    lastPrice:trade.entryPrice||0,
-    lastPriceAt:null,
-    priceStatus:'en attente du premier cours après achat',
-    autoPending:false
-   });
-  }else{
-   realPositions=realPositions.filter(x=>x.mint!==trade.mint);
-  }
-
-  pendingTrade=null;
-  saveRealData();
-
-  document.getElementById('pendingTrade').innerHTML=
-   'Transaction confirmée par Jupiter. <a href="https://solscan.io/tx/'+
-   encodeURIComponent(signature)+'" target="_blank" rel="noopener">Voir sur Solscan</a>';
-
-  realStatus('Connecté : '+phantomAddress);
-  renderRealPositions();
-  renderRealHistory();
-
- }catch(e){
-  document.getElementById('pendingTrade').textContent=
-   'Transaction non confirmée : '+(e.message||e)+
-   '. Vérifie Phantom et ton historique avant de réessayer.';
- }finally{
-  realBusy=false;
-  document.getElementById('signTradeBtn').disabled=!pendingTrade;
- }
-}
-
-function updateRisk(mint,field,value){
- const p=realPositions.find(x=>x.mint===decodeURIComponent(mint));
- if(!p)return;
- const n=Number(value);
- if(!Number.isFinite(n))return;
-
- if(field==='stopLoss')p.stopLoss=Math.max(-99,Math.min(-0.1,n));
- if(field==='takeProfit')p.takeProfit=Math.max(0.1,Math.min(10000,n));
-
- saveRealData();
- renderRealPositions();
-}
-
-function renderRealPositions(){
- const el=document.getElementById('realPositions');
-
- if(!realPositions.length){
-  el.textContent='Aucune position réelle suivie.';
-  return;
- }
-
- el.innerHTML=realPositions.map(p=>{
-  const entry=num(p.entryPrice);
-  const current=num(p.lastPrice);
-  const pct=entry>0&&current>0?(current/entry-1)*100:null;
-  const priceAge=p.lastPriceAt?Date.now()-new Date(p.lastPriceAt).getTime():Infinity;
-  const stale=priceAge>POSITION_STALE_MS;
-  const state=p.autoPending?'VENTE PRÉPARÉE — SIGNATURE REQUISE':
-   (stale?'ALERTE : COURS NON ACTUALISÉ':p.priceStatus||'En attente de cours');
-
-  return `
-  <div class="pool">
-   <strong>${escapeHtml(p.name||'Position')}</strong>
-   <div class="meta">Mint : ${escapeHtml(p.mint)}</div>
-   <div class="meta">Prix de référence avant achat : ${entry?'$'+entry:'indisponible'}</div>
-   <div class="meta">Dernier cours reçu : ${current?'$'+current:'indisponible'} • Variation indicative : ${pct===null?'indisponible':(pct>=0?'+':'')+pct.toFixed(2)+' %'}</div>
-   <div class="meta">Âge du dernier cours : ${p.lastPriceAt?ageText(new Date(p.lastPriceAt).getTime()):'aucun cours reçu'}</div>
-   <div class="${stale?'bad':'good'} meta">Diagnostic : ${escapeHtml(state)}</div>
-   <div class="position-controls">
-    <div>
-     <label>Stop-loss (%)</label>
-     <input type="number" step="0.5" value="${num(p.stopLoss??DEFAULT_SL)}"
-      onchange="updateRisk('${encodeURIComponent(p.mint)}','stopLoss',this.value)">
-    </div>
-    <div>
-     <label>Take-profit (%)</label>
-     <input type="number" step="0.5" value="${num(p.takeProfit??DEFAULT_TP)}"
-      onchange="updateRisk('${encodeURIComponent(p.mint)}','takeProfit',this.value)">
-    </div>
-   </div>
-   <div class="meta">Seuil SL : ${num(p.stopLoss??DEFAULT_SL)} % • Seuil TP : +${num(p.takeProfit??DEFAULT_TP)} %</div>
-   <button class="sell" onclick="prepareRealSell('${encodeURIComponent(p.mint)}','${encodeURIComponent(p.name||p.mint)}')">Préparer la vente réelle (tout)</button>
-  </div>`;
- }).join('');
-}
-
-function renderRealHistory(){
- const el=document.getElementById('realHistory');
- if(!realHistory.length){
-  el.textContent='Aucune transaction enregistrée.';
-  return;
- }
- el.innerHTML=realHistory.slice(0,50).map(x=>`
-  <div class="pool">
-   <strong>${escapeHtml(x.type)} — ${escapeHtml(x.name)}</strong>
-   <div class="meta">${escapeHtml(x.date)} • ${escapeHtml(x.mint||'')}</div>
-   ${x.signature?'<div class="meta"><a href="https://solscan.io/tx/'+encodeURIComponent(x.signature)+'" target="_blank" rel="noopener">Voir sur Solscan</a></div>':''}
-  </div>`).join('');
-}
-
-/* SURVEILLANCE : UN POOL DE POSITION PAR CYCLE */
-async function monitorRealPositions(){
- if(positionBusy||document.hidden||!phantomAddress||!realPositions.length)return;
-
- const eligible=realPositions.filter(p=>p.poolId&&!p.autoPending);
- if(!eligible.length){
-  document.getElementById('positionDiagnostics').textContent=
-   'Aucune position actuellement disponible pour la surveillance automatique.';
-  return;
- }
-
- positionBusy=true;
-
- try{
-  if(positionIndex>=eligible.length)positionIndex=0;
-  const p=eligible[positionIndex];
-  positionIndex=(positionIndex+1)%eligible.length;
-
-  const url='https://api.geckoterminal.com/api/v2/networks/solana/pools/'+encodeURIComponent(p.poolId);
-  const j=await fetchJson(url);
-  const price=num(j?.data?.attributes?.base_token_price_usd);
-
-  if(!(price>0))throw new Error('Prix du jeton indisponible.');
-
-  p.lastPrice=price;
-  p.lastPriceAt=new Date().toISOString();
-  p.priceStatus='cours actualisé';
-  lastPositionSuccessAt=Date.now();
-
-  const entry=num(p.entryPrice);
-  if(entry>0){
-   const change=(price/entry-1)*100;
-   const sl=num(p.stopLoss??DEFAULT_SL);
-   const tp=num(p.takeProfit??DEFAULT_TP);
-
-   if(change<=sl||change>=tp){
-    p.autoPending=true;
-    p.priceStatus='seuil atteint : préparation de vente';
-    saveRealData();
-    renderRealPositions();
-
-    await prepareRealSell(
-     p.mint,
-     encodeURIComponent(p.name||p.mint),
-     true
-    );
-   }
-  }
-
-  document.getElementById('positionDiagnostics').textContent=
-   'Surveillance réussie : '+p.name+
-   ' • Dernier cours reçu il y a quelques secondes.';
-
- }catch(e){
-  const current=eligible[Math.max(0,positionIndex-1)]||eligible[0];
-  if(current)current.priceStatus='échec réseau : '+(e.message||e);
-  document.getElementById('positionDiagnostics').textContent=
-   'ALERTE SURVEILLANCE : '+(e.message||e)+
-   '. La position n’a pas pu être vérifiée.';
- }finally{
-  saveRealData();
-  renderRealPositions();
-  positionBusy=false;
- }
-}
-
-/* CHARGEMENT DES 5 PAGES */
-function rebuildPools(){
- const merged=new Map();
-
- for(let page=1;page<=5;page++){
-  for(const p of (poolPages[page]||[])){
-   if(p?.id)merged.set(p.id,mapPool(p));
-  }
- }
-
- allPools=[...merged.values()].slice(0,MAX_POOLS);
- allPools.forEach(p=>p.score=scorePool(p));
- renderPools();
-}
-
-async function fetchPoolPage(page){
- const url=API+'&page='+page;
- const j=await fetchJson(url);
-
- if(!Array.isArray(j.data))throw new Error('Réponse GeckoTerminal invalide.');
-
- poolPages[page]=j.data;
- rebuildPools();
- lastScannerSuccessAt=Date.now();
- updateNetworkDisplay();
-
- return j.data.length;
-}
-
-async function refreshCycle(){
- if(loading||document.hidden)return;
- loading=true;
-
- const status=document.getElementById('status');
- const diagnostics=document.getElementById('diagnostics');
- let nextDelay=SCAN_INTERVAL;
-
- try{
-  status.textContent='Chargement de la page '+pageNumber+'/5…';
-
-  const count=await fetchPoolPage(pageNumber);
-
-  diagnostics.textContent=
-   'Page '+pageNumber+' reçue : '+count+
-   ' pools • Total unique chargé : '+allPools.length+
-   ' • Requêtes espacées pour limiter les erreurs réseau.';
-
-  status.textContent=
-   'Dernière actualisation : '+new Date().toLocaleTimeString('fr-FR')+
-   ' • '+allPools.length+' pools chargés • Page '+pageNumber+'/5';
-
-  pageNumber=pageNumber>=5?1:pageNumber+1;
-
- }catch(e){
-  const message=e.message||String(e);
-  status.textContent='Erreur réseau : '+message;
-  diagnostics.textContent=
-   'Le scanner conserve les dernières données reçues. Les achats sont bloqués si les cours deviennent trop anciens.';
-
-  nextDelay=message.includes('429')?65000:30000;
- }finally{
-  loading=false;
-  updateNetworkDisplay();
-  clearTimeout(timer);
-  timer=setTimeout(refreshCycle,nextDelay);
- }
-}
-
-function loadPools(){
- if(loading)return;
- clearTimeout(timer);
- refreshCycle();
-}
-
-function startPositionMonitoring(){
- clearInterval(positionTimer);
- positionTimer=setInterval(()=>{
-  if(!document.hidden)monitorRealPositions();
- },POSITION_INTERVAL);
-}
-
-document.addEventListener('visibilitychange',()=>{
- if(!document.hidden){
-  clearTimeout(timer);
-  refreshCycle();
-  monitorRealPositions();
- }else{
-  document.getElementById('status').textContent=
-   'Page en arrière-plan : actualisation suspendue. Les positions ne sont plus surveillées.';
- }
-});
-
-window.addEventListener('beforeunload',()=>{
- clearTimeout(timer);
- clearInterval(positionTimer);
-});
-
-renderRealLock();
-renderRealPositions();
-renderRealHistory();
-updateNetworkDisplay();
-startPositionMonitoring();
-refreshCycle();
+$('refresh').addEventListener('click',load);
+['minSwaps','minBuyers','maxLoss'].forEach(id=>$(id).addEventListener('input',render));
+load();setInterval(load,15000);
 </script>
 </body>
 </html>
