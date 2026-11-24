@@ -36,12 +36,9 @@ const TOKEN_2022_PROGRAM = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 
 // Official mainnet program addresses. We listen for actual transactions, not market-indexer data.
 const DEX_PROGRAMS = [
-  { name: "Raydium AMM v4", id: "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8" },
-  { name: "Raydium CPMM", id: "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C" },
-  { name: "Raydium CLMM", id: "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK" },
+  // Focus on new-token launch activity and Raydium's constant-product pools.
   { name: "Raydium LaunchLab", id: "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj" },
-  { name: "Orca Whirlpools", id: "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc" },
-  { name: "Meteora DLMM", id: "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo" }
+  { name: "Raydium CPMM", id: "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C" }
 ];
 
 const CONFIG = {
