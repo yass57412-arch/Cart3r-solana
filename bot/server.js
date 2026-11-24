@@ -5,77 +5,77 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const API = "https://api.dexscreener.com";
+const DEX = "https://api.dexscreener.com";
 
-// CONFIGURATION CART3R
 const MAX_POOLS = 30;
-const TOKENS_PER_SCAN = 5;
 const SCAN_INTERVAL = 180000;
-const REQUEST_GAP = 2000;
-const COOLDOWN_MS = 90000;
-
+const COOLDOWN_MS = 180000;
 const MIN_LIQUIDITY = 3000;
 const MIN_VOLUME_1H = 500;
-const MAX_POOL_AGE = 30 * 60 * 1000;
+const MAX_AGE = 30 * 60 * 1000;
 
 let running = true;
 let scanning = false;
-
 let pools = new Map();
 let snapshots = new Map();
 
+let scanner = "STARTING";
 let lastUpdate = null;
 let lastError = null;
-let scannerState = "STARTING";
-let nextScanAt = Date.now();
 let cooldownUntil = 0;
-let scanTimer = null;
+let nextScanAt = Date.now();
+let timer = null;
+let heliusLastCheck = null;
+let heliusLastSlot = null;
+let heliusError = null;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-function num(value) {
-  const n = Number(value);
+function num(v) {
+  const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
-async function apiGet(url) {
+async function request(url, options = {}) {
   const response = await fetch(url, {
-    headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(15000)
+    ...options,
+    signal: AbortSignal.timeout(20000)
   });
 
   if (response.status === 429) {
     cooldownUntil = Date.now() + COOLDOWN_MS;
-    throw new Error("Limite API : pause de 90 secondes");
+    throw new Error("Limite API : pause de 180 secondes");
   }
 
   if (!response.ok) {
-    throw new Error("Erreur DEX Screener HTTP " + response.status);
+    throw new Error("HTTP " + response.status);
   }
 
   return response.json();
 }
 
-function calculateScore(pool, previous) {
-  const liquidity = num(pool.liquidity?.usd);
-  const volume1h = num(pool.volume?.h1);
-  const volume5m = num(pool.volume?.m5);
+function scorePair(pair) {
+  const liquidity = num(pair.liquidity?.usd);
+  const volume1h = num(pair.volume?.h1);
+  const volume5m = num(pair.volume?.m5);
 
-  const buys = num(pool.txns?.h1?.buys);
-  const sells = num(pool.txns?.h1?.sells);
-  const buys5m = num(pool.txns?.m5?.buys);
-  const sells5m = num(pool.txns?.m5?.sells);
+  const buys = num(pair.txns?.h1?.buys);
+  const sells = num(pair.txns?.h1?.sells);
+  const buys5m = num(pair.txns?.m5?.buys);
+  const sells5m = num(pair.txns?.m5?.sells);
 
-  const change = num(pool.priceChange?.h1);
+  const change1h = num(pair.priceChange?.h1);
+  const change5m = num(pair.priceChange?.m5);
+
   const total = buys + sells;
   const total5m = buys5m + sells5m;
 
-  // Accélération du volume : 25 points
+  const old = snapshots.get(pair.pairAddress);
   let acceleration = 0;
 
-  if (previous && previous.volume5m > 0) {
+  if (old && old.volume5m > 0) {
     const growth =
-      (volume5m - previous.volume5m) / previous.volume5m;
+      (volume5m - old.volume5m) / old.volume5m;
 
     acceleration = Math.max(
       0,
@@ -84,63 +84,84 @@ function calculateScore(pool, previous) {
   } else {
     acceleration = Math.min(
       25,
-      (volume5m / Math.max(volume1h, 1)) * 300
+      volume1h > 0 ? volume5m / volume1h * 300 : 0
     );
   }
 
-  // Nombre d'achats : 20 points
-  const buyScore = Math.min(20, buys * 0.4);
+  const volumeScore = Math.min(
+    20,
+    Math.log10(Math.max(1, volume1h)) * 5
+  );
 
-  // Équilibre achats / ventes : 15 points
+  const buyScore = Math.min(15, buys * 0.3);
+
   const ratioScore = total > 0
     ? (buys / total) * 15
     : 0;
 
-  // Liquidité : 15 points
   const liquidityScore = Math.min(
     15,
     Math.log10(Math.max(1, liquidity / 1000)) * 7
   );
 
-  // Momentum : 15 points
   const momentumScore = Math.max(
     0,
-    Math.min(15, change * 1.5)
+    Math.min(10, change1h * 0.7 + change5m * 0.5)
   );
 
-  // Activité récente : 10 points
-  const activityScore = Math.min(10, total5m * 0.5);
+  const activityScore = Math.min(
+    10,
+    total5m * 0.5
+  );
 
-  const score = Math.round(
+  const rawScore =
     acceleration +
+    volumeScore +
     buyScore +
     ratioScore +
     liquidityScore +
     momentumScore +
-    activityScore
+    activityScore;
+
+  const score = Math.round(
+    Math.max(0, Math.min(100, rawScore))
   );
 
+  snapshots.set(pair.pairAddress, {
+    volume5m,
+    time: Date.now()
+  });
+
   return {
-    score: Math.min(100, Math.max(0, score)),
+    score,
     acceleration: Math.round(acceleration),
     buyRatio: Math.round(
-      total > 0 ? (buys / total) * 100 : 0
+      total > 0 ? buys / total * 100 : 0
     ),
     activity5m: total5m
   };
 }
 
-function formatPool(pair) {
+function formatPair(pair) {
+  const liquidity = num(pair.liquidity?.usd);
+  const volume1h = num(pair.volume?.h1);
+  const result = scorePair(pair);
+
+  const created = num(pair.pairCreatedAt);
+  const ageMinutes = created
+    ? Math.max(0, (Date.now() - created) / 60000)
+    : null;
+
   return {
     name: pair.baseToken?.name || "Inconnu",
     symbol: pair.baseToken?.symbol || "???",
     address: pair.baseToken?.address || "",
-    pairAddress: pair.pairAddress || "",
+    pairAddress: pair.pairAddress,
     dex: pair.dexId || "Inconnu",
 
     priceUsd: num(pair.priceUsd),
-    liquidity: num(pair.liquidity?.usd),
-    volume1h: num(pair.volume?.h1),
+    liquidity,
+    volume1h,
     volume5m: num(pair.volume?.m5),
     volume24h: num(pair.volume?.h24),
 
@@ -150,7 +171,19 @@ function formatPool(pair) {
     sells5m: num(pair.txns?.m5?.sells),
 
     priceChange1h: num(pair.priceChange?.h1),
+    priceChange5m: num(pair.priceChange?.m5),
+
+    ageMinutes,
+    score: result.score,
+    acceleration: result.acceleration,
+    buyRatio: result.buyRatio,
+    activity5m: result.activity5m,
+
     url: pair.url || "",
+    eligible:
+      liquidity >= MIN_LIQUIDITY &&
+      volume1h >= MIN_VOLUME_1H,
+
     lastSeen: Date.now()
   };
 }
@@ -159,88 +192,59 @@ async function scanPools() {
   if (!running || scanning) return;
 
   if (Date.now() < cooldownUntil) {
-    scannerState = "COOLDOWN";
+    scanner = "COOLDOWN";
     nextScanAt = cooldownUntil;
     return;
   }
 
   scanning = true;
-  scannerState = "SCANNING";
+  scanner = "SCANNING";
 
   try {
-    // Une seule requête pour découvrir les tokens
-    const profiles = await apiGet(
-      `${API}/token-profiles/latest/v1`
+    // REQUETE 1 : découverte des tokens
+    const profiles = await request(
+      `${DEX}/token-profiles/latest/v1`
     );
 
-    const tokens = (
-      Array.isArray(profiles) ? profiles : []
-    )
-      .filter(item =>
-        item.chainId === "solana" && item.tokenAddress
+    const addresses = [
+      ...new Set(
+        (Array.isArray(profiles) ? profiles : [])
+          .filter(p =>
+            p.chainId === "solana" && p.tokenAddress
+          )
+          .map(p => p.tokenAddress)
       )
-      .slice(0, TOKENS_PER_SCAN);
+    ].slice(0, 30);
 
-    let successful = 0;
-
-    // Requêtes séquentielles pour limiter la pression API
-    for (const token of tokens) {
-      if (!running) break;
-
-      if (Date.now() < cooldownUntil) {
-        throw new Error("Limite API : pause de 90 secondes");
-      }
-
-      const data = await apiGet(
-        `${API}/token-pairs/v1/solana/${token.tokenAddress}`
-      );
-
-      successful++;
-
-      if (Array.isArray(data)) {
-        for (const pair of data) {
-          if (
-            pair.chainId !== "solana" ||
-            !pair.pairAddress
-          ) continue;
-
-          const formatted = formatPool(pair);
-
-          if (formatted.liquidity <= 0) continue;
-
-          const oldSnapshot = snapshots.get(
-            formatted.pairAddress
-          );
-
-          const score = calculateScore(pair, oldSnapshot);
-
-          formatted.score = score.score;
-          formatted.acceleration = score.acceleration;
-          formatted.buyRatio = score.buyRatio;
-          formatted.activity5m = score.activity5m;
-
-          formatted.eligible =
-            formatted.liquidity >= MIN_LIQUIDITY &&
-            formatted.volume1h >= MIN_VOLUME_1H;
-
-          formatted.risk = !formatted.eligible
-            ? "CRITÈRES INSUFFISANTS"
-            : "À ANALYSER";
-
-          pools.set(formatted.pairAddress, formatted);
-
-          snapshots.set(formatted.pairAddress, {
-            volume5m: formatted.volume5m,
-            time: Date.now()
-          });
-        }
-      }
-
-      await sleep(REQUEST_GAP);
+    if (addresses.length === 0) {
+      throw new Error("Aucun token Solana découvert");
     }
 
-    // Nettoyage des pools trop anciens
-    const cutoff = Date.now() - MAX_POOL_AGE;
+    // REQUETE 2 : données groupées des 30 tokens
+    const url =
+      `${DEX}/tokens/v1/solana/${addresses.join(",")}`;
+
+    const data = await request(url);
+
+    if (!Array.isArray(data)) {
+      throw new Error("Réponse DEX Screener invalide");
+    }
+
+    for (const pair of data) {
+      if (
+        pair.chainId !== "solana" ||
+        !pair.pairAddress
+      ) continue;
+
+      const formatted = formatPair(pair);
+
+      if (formatted.liquidity <= 0) continue;
+
+      pools.set(formatted.pairAddress, formatted);
+    }
+
+    // Supprimer les pools non actualisés depuis 30 minutes
+    const cutoff = Date.now() - MAX_AGE;
 
     for (const [key, pool] of pools.entries()) {
       if (pool.lastSeen < cutoff) {
@@ -249,31 +253,30 @@ async function scanPools() {
       }
     }
 
-    // Classement des 30 pools les plus actifs
+    // Garder les 30 meilleures opportunités selon les critères
     const ranked = Array.from(pools.values())
-      .filter(pool => pool.eligible)
+      .filter(p => p.eligible)
       .sort((a, b) => b.score - a.score)
       .slice(0, MAX_POOLS);
 
     pools = new Map(
-      ranked.map(pool => [pool.pairAddress, pool])
+      ranked.map(p => [p.pairAddress, p])
     );
 
     lastUpdate = new Date().toISOString();
     lastError = null;
-    scannerState = successful > 0 ? "OK" : "EMPTY";
+    scanner = "OK";
 
   } catch (error) {
     lastError = error.message || "Erreur inconnue";
 
-    scannerState = Date.now() < cooldownUntil
+    scanner = Date.now() < cooldownUntil
       ? "COOLDOWN"
       : "ERROR";
 
-    // Les pools déjà récupérés sont conservés
+    // Ne pas effacer les pools en cas d'échec.
   } finally {
     scanning = false;
-
     nextScanAt = Math.max(
       Date.now() + SCAN_INTERVAL,
       cooldownUntil
@@ -281,15 +284,68 @@ async function scanPools() {
   }
 }
 
+// Vérification indépendante de Helius
+async function checkHelius() {
+  const rpc = process.env.HELIUS_RPC_URL;
+
+  if (!rpc) {
+    return {
+      ok: false,
+      error: "HELIUS_RPC_URL absente"
+    };
+  }
+
+  try {
+    const result = await request(rpc, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getSlot",
+        params: [{ commitment: "confirmed" }]
+      })
+    });
+
+    if (result.error || typeof result.result !== "number") {
+      throw new Error(
+        result.error?.message || "Réponse RPC invalide"
+      );
+    }
+
+    heliusLastSlot = result.result;
+    heliusLastCheck = new Date().toISOString();
+    heliusError = null;
+
+    return {
+      ok: true,
+      slot: heliusLastSlot,
+      checkedAt: heliusLastCheck
+    };
+
+  } catch (error) {
+    heliusError = error.message;
+    heliusLastCheck = new Date().toISOString();
+
+    return {
+      ok: false,
+      error: heliusError,
+      checkedAt: heliusLastCheck
+    };
+  }
+}
+
 function startScanner() {
-  if (scanTimer) clearInterval(scanTimer);
+  if (timer) clearInterval(timer);
 
   running = true;
   nextScanAt = Date.now();
 
   scanPools();
 
-  scanTimer = setInterval(() => {
+  timer = setInterval(() => {
     if (running) scanPools();
   }, SCAN_INTERVAL);
 }
@@ -297,22 +353,21 @@ function startScanner() {
 function stopScanner() {
   running = false;
 
-  if (scanTimer) {
-    clearInterval(scanTimer);
-    scanTimer = null;
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
   }
 
-  scannerState = "STOPPED";
+  scanner = "STOPPED";
 }
 
 app.get("/", (req, res) => {
   res.json({
     name: "CART3R",
     mode: "TEST",
-    source: "DEX Screener",
+    source: ["DEX Screener", "Helius RPC"],
     maxPools: MAX_POOLS,
-    scanIntervalSeconds: SCAN_INTERVAL / 1000,
-    message: "Scanner actif"
+    scanIntervalSeconds: SCAN_INTERVAL / 1000
   });
 });
 
@@ -330,7 +385,7 @@ app.get("/status", (req, res) => {
     running,
     mode: "TEST",
     realTrading: false,
-    scanner: scannerState,
+    scanner,
     poolsFound: pools.size,
     lastUpdate,
     lastError,
@@ -338,8 +393,19 @@ app.get("/status", (req, res) => {
     nextScanInSeconds: Math.max(
       0,
       Math.ceil((nextScanAt - Date.now()) / 1000)
-    )
+    ),
+    helius: {
+      configured: Boolean(process.env.HELIUS_RPC_URL),
+      lastCheck: heliusLastCheck,
+      lastSlot: heliusLastSlot,
+      lastError: heliusError
+    }
   });
+});
+
+app.get("/helius-test", async (req, res) => {
+  const result = await checkHelius();
+  res.status(result.ok ? 200 : 502).json(result);
 });
 
 app.get("/pools", (req, res) => {
@@ -375,7 +441,7 @@ app.post("/test/stop", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(
-    `CART3R TEST scanner listening on port ${PORT}`
+    `CART3R TEST engine listening on port ${PORT}`
   );
 
   startScanner();
