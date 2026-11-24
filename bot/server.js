@@ -551,7 +551,10 @@ async function drainQueue() {
     state.processing++;
     processSignature(item.signature, item.dexName, item.slot)
       .catch(e => { state.helius.lastError = safeError(e); })
-      .finally(() => { state.processing--; });
+      .finally(() => {
+        state.processing--;
+        drainQueue();
+      });
   }
 }
 
