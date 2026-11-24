@@ -2,8 +2,8 @@
 "use strict";
 
 const express = require("express");
-
 const app = express();
+
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
@@ -11,57 +11,76 @@ const HELIUS_RPC_URL = process.env.HELIUS_RPC_URL || "";
 
 const CONFIG = {
   MAX_POOLS: 30,
-  SCAN_INTERVAL: 180000,
-  COOLDOWN_MS: 180000,
+
+  // Un scan toutes les 5 minutes
+  SCAN_INTERVAL: 300000,
+
+  // Liste des tokens conservée 30 minutes
+  ADDRESSES_CACHE_MS: 1800000,
+
+  // Données des paires conservées 5 minutes
+  PAIRS_CACHE_MS: 300000,
+
+  COOLDOWN_MS: 300000,
   REQUEST_TIMEOUT: 15000,
 
   MIN_LIQUIDITY_USD: 3000,
   MIN_VOLUME_1H_USD: 500,
   MIN_AGE_MINUTES: 5,
 
-  // Simulation indicative uniquement
   TEST_TRADE_USD: 10,
 
-  DEX_PROFILES:
+  PROFILES_URL:
     "https://api.dexscreener.com/token-profiles/latest/v1",
 
-  DEX_TOKENS:
+  TOKENS_URL:
     "https://api.dexscreener.com/tokens/v1/solana/"
 };
 
 let running = true;
 let scanning = false;
-let mode = "TEST";
-let realTrading = false;
-
 let scannerState = "STARTING";
+
 let pools = [];
 let lastUpdate = null;
 let lastError = null;
+
 let cooldownUntil = 0;
-let nextScanInSeconds = 0;
+let nextScanAt = Date.now();
 
 let heliusLastSlot = null;
 let heliusLastCheck = null;
 let heliusError = null;
 
 let scanTimer = null;
+let heliusTimer = null;
 let countdownTimer = null;
+let nextScanInSeconds = 0;
+
+let cachedAddresses = [];
+let addressesFetchedAt = 0;
+
+let cachedPairs = [];
+let pairsFetchedAt = 0;
 
 const snapshots = new Map();
+
+// --------------------------------------------------
+// OUTILS
+// --------------------------------------------------
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function number(value) {
+function num(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
 
 function round(value, decimals = 2) {
   const p = Math.pow(10, decimals);
-  return Math.round(number(value) * p) / p;
+  return Math.round(num(value) * p) / p;
 }
 
 function shorten(value) {
@@ -69,8 +88,9 @@ function shorten(value) {
   return value.slice(0, 6) + "..." + value.slice(-4);
 }
 
-async function fetchJson(url, options = {}) {
+async function fetchJson(url) {
   const controller = new AbortController();
+
   const timeout = setTimeout(
     () => controller.abort(),
     CONFIG.REQUEST_TIMEOUT
@@ -78,22 +98,23 @@ async function fetchJson(url, options = {}) {
 
   try {
     const response = await fetch(url, {
-      ...options,
       signal: controller.signal,
-      headers: {
-        "Accept": "application/json",
-        ...(options.headers || {})
-      }
+      headers: { Accept: "application/json" }
     });
 
     if (response.status === 429) {
-      const error = new Error("Limite API : pause de 180 secondes");
+      cooldownUntil = Date.now() + CONFIG.COOLDOWN_MS;
+
+      const error = new Error(
+        "Limite DEX Screener : pause de 300 secondes"
+      );
+
       error.status = 429;
       throw error;
     }
 
     if (!response.ok) {
-      throw new Error("HTTP " + response.status);
+      throw new Error("DEX Screener HTTP " + response.status);
     }
 
     return await response.json();
@@ -103,7 +124,7 @@ async function fetchJson(url, options = {}) {
 }
 
 // --------------------------------------------------
-// HELIUS : RPC SOLANA
+// HELIUS : INDÉPENDANT DE DEX SCREENER
 // --------------------------------------------------
 
 async function heliusRequest(method, params = []) {
@@ -112,6 +133,7 @@ async function heliusRequest(method, params = []) {
   }
 
   const controller = new AbortController();
+
   const timeout = setTimeout(
     () => controller.abort(),
     CONFIG.REQUEST_TIMEOUT
@@ -137,7 +159,7 @@ async function heliusRequest(method, params = []) {
     const data = await response.json();
 
     if (data.error) {
-      throw new Error(data.error.message || "Erreur RPC Helius");
+      throw new Error(data.error.message || "Erreur Helius");
     }
 
     return data.result;
@@ -147,11 +169,6 @@ async function heliusRequest(method, params = []) {
 }
 
 async function checkHelius() {
-  if (!HELIUS_RPC_URL) {
-    heliusError = "Helius non configuré";
-    return false;
-  }
-
   try {
     const slot = await heliusRequest("getSlot", [
       { commitment: "confirmed" }
@@ -168,83 +185,74 @@ async function checkHelius() {
   }
 }
 
-// --------------------------------------------------
-// AUTORITÉS MINT ET FREEZE
-// --------------------------------------------------
-
-function readUInt32LE(buffer, offset) {
-  return buffer.readUInt32LE(offset);
-}
-
-function parseMintAccount(account) {
-  if (!account || !account.data || !account.data[0]) {
-    return {
-      checked: false,
-      error: "Compte mint introuvable"
-    };
-  }
-
-  try {
-    const data = Buffer.from(account.data[0], "base64");
-
-    if (data.length < 82) {
-      return {
-        checked: false,
-        error: "Données mint invalides"
-      };
-    }
-
-    const mintAuthorityOption = readUInt32LE(data, 0);
-    const supply = data.readBigUInt64LE(36).toString();
-    const decimals = data.readUInt8(44);
-    const initialized = data.readUInt8(45) === 1;
-    const freezeAuthorityOption = readUInt32LE(data, 46);
-
-    return {
-      checked: true,
-      initialized,
-      mintAuthorityActive: mintAuthorityOption !== 0,
-      freezeAuthorityActive: freezeAuthorityOption !== 0,
-      supply,
-      decimals
-    };
-  } catch (error) {
-    return {
-      checked: false,
-      error: "Lecture mint impossible"
-    };
-  }
-}
-
+// Vérification Helius indépendante du scanner DEX.
 async function checkMintAuthorities(addresses) {
   const results = new Map();
 
-  if (!HELIUS_RPC_URL || addresses.length === 0) {
+  if (!HELIUS_RPC_URL || !addresses.length) {
     for (const address of addresses) {
       results.set(address, {
         checked: false,
         error: "Helius indisponible"
       });
     }
+
     return results;
   }
 
   try {
-    // Un seul appel RPC groupé pour les tokens du scan.
-    const response = await heliusRequest("getMultipleAccounts", [
-      addresses,
-      { encoding: "base64", commitment: "confirmed" }
-    ]);
+    const response = await heliusRequest(
+      "getMultipleAccounts",
+      [
+        addresses,
+        {
+          encoding: "base64",
+          commitment: "confirmed"
+        }
+      ]
+    );
 
     const accounts = response && response.value
       ? response.value
       : [];
 
     addresses.forEach((address, index) => {
-      results.set(
-        address,
-        parseMintAccount(accounts[index])
-      );
+      const account = accounts[index];
+
+      if (!account || !account.data || !account.data[0]) {
+        results.set(address, {
+          checked: false,
+          error: "Compte mint introuvable"
+        });
+        return;
+      }
+
+      try {
+        const data = Buffer.from(
+          account.data[0],
+          "base64"
+        );
+
+        if (data.length < 82) {
+          throw new Error("Données mint invalides");
+        }
+
+        results.set(address, {
+          checked: true,
+          initialized: data.readUInt8(45) === 1,
+          mintAuthorityActive:
+            data.readUInt32LE(0) !== 0,
+          freezeAuthorityActive:
+            data.readUInt32LE(46) !== 0,
+          decimals: data.readUInt8(44),
+          supply: data.readBigUInt64LE(36).toString()
+        });
+      } catch (error) {
+        results.set(address, {
+          checked: false,
+          error: error.message
+        });
+      }
     });
   } catch (error) {
     heliusError = error.message;
@@ -261,57 +269,117 @@ async function checkMintAuthorities(addresses) {
 }
 
 // --------------------------------------------------
-// DEX SCREENER
+// CACHE DES ADRESSES
 // --------------------------------------------------
 
-async function discoverTokens() {
-  const data = await fetchJson(CONFIG.DEX_PROFILES);
+async function getAddresses() {
+  const cacheValid =
+    cachedAddresses.length > 0 &&
+    Date.now() - addressesFetchedAt <
+      CONFIG.ADDRESSES_CACHE_MS;
 
-  if (!Array.isArray(data)) return [];
-
-  const addresses = [];
-
-  for (const item of data) {
-    if (
-      item &&
-      item.chainId === "solana" &&
-      item.tokenAddress &&
-      !addresses.includes(item.tokenAddress)
-    ) {
-      addresses.push(item.tokenAddress);
-    }
-
-    if (addresses.length >= CONFIG.MAX_POOLS) break;
+  if (cacheValid) {
+    return cachedAddresses;
   }
 
-  return addresses;
-}
+  try {
+    const data = await fetchJson(CONFIG.PROFILES_URL);
 
-async function fetchTokenPairs(addresses) {
-  const allPairs = [];
-
-  // DEX Screener accepte des groupes d'adresses.
-  for (let i = 0; i < addresses.length; i += 30) {
-    const group = addresses.slice(i, i + 30);
-
-    const url =
-      CONFIG.DEX_TOKENS + group.join(",");
-
-    const data = await fetchJson(url);
-
-    if (Array.isArray(data)) {
-      allPairs.push(...data);
+    if (!Array.isArray(data)) {
+      throw new Error("Réponse DEX invalide");
     }
 
-    await sleep(300);
+    const addresses = [];
+
+    for (const item of data) {
+      if (
+        item &&
+        item.chainId === "solana" &&
+        item.tokenAddress &&
+        !addresses.includes(item.tokenAddress)
+      ) {
+        addresses.push(item.tokenAddress);
+      }
+
+      if (addresses.length >= CONFIG.MAX_POOLS) break;
+    }
+
+    if (!addresses.length) {
+      throw new Error("Aucun token Solana trouvé");
+    }
+
+    cachedAddresses = addresses;
+    addressesFetchedAt = Date.now();
+
+    return cachedAddresses;
+  } catch (error) {
+    if (cachedAddresses.length > 0) {
+      console.log("Utilisation du cache des tokens");
+      return cachedAddresses;
+    }
+
+    throw error;
+  }
+}
+
+// --------------------------------------------------
+// CACHE DES PAIRES
+// --------------------------------------------------
+
+async function getPairs(addresses) {
+  const cacheValid =
+    cachedPairs.length > 0 &&
+    Date.now() - pairsFetchedAt <
+      CONFIG.PAIRS_CACHE_MS;
+
+  if (cacheValid) {
+    return cachedPairs;
   }
 
-  return allPairs;
+  try {
+    const allPairs = [];
+
+    // Un seul appel groupé pour les 30 tokens.
+    for (let i = 0; i < addresses.length; i += 30) {
+      const group = addresses.slice(i, i + 30);
+
+      const url =
+        CONFIG.TOKENS_URL + group.join(",");
+
+      const data = await fetchJson(url);
+
+      if (Array.isArray(data)) {
+        allPairs.push(...data);
+      }
+    }
+
+    if (!allPairs.length) {
+      throw new Error("Aucune paire reçue");
+    }
+
+    cachedPairs = allPairs;
+    pairsFetchedAt = Date.now();
+
+    return cachedPairs;
+  } catch (error) {
+    if (cachedPairs.length > 0) {
+      console.log("Utilisation du cache des paires");
+      return cachedPairs;
+    }
+
+    throw error;
+  }
 }
+
+// --------------------------------------------------
+// SÉLECTION DES PAIRES
+// --------------------------------------------------
 
 function chooseBestPair(address, pairs) {
   const matching = pairs.filter(pair => {
-    if (!pair || pair.chainId !== "solana") return false;
+    if (!pair || pair.chainId !== "solana") {
+      return false;
+    }
 
     const base = pair.baseToken && pair.baseToken.address;
     const quote = pair.quoteToken && pair.quoteToken.address;
@@ -322,46 +390,53 @@ function chooseBestPair(address, pairs) {
   if (!matching.length) return null;
 
   matching.sort((a, b) =>
-    number(b.liquidity && b.liquidity.usd) -
-    number(a.liquidity && a.liquidity.usd)
+    num(b.liquidity && b.liquidity.usd) -
+    num(a.liquidity && a.liquidity.usd)
   );
 
   return matching[0];
 }
 
 // --------------------------------------------------
-// ANALYSE ET RISQUES
+// ANALYSE ET SÉCURITÉ
 // --------------------------------------------------
 
-function calculatePool(address, pair, mint) {
-  const liquidity = number(pair.liquidity && pair.liquidity.usd);
+function analyzePool(address, pair, mint) {
+  const liquidity = num(
+    pair.liquidity && pair.liquidity.usd
+  );
+
   const volume = pair.volume || {};
   const txns = pair.txns || {};
-  const change = pair.priceChange || {};
+  const changes = pair.priceChange || {};
 
-  const buys5m = number(txns.m5 && txns.m5.buys);
-  const sells5m = number(txns.m5 && txns.m5.sells);
+  const buys5m = num(txns.m5 && txns.m5.buys);
+  const sells5m = num(txns.m5 && txns.m5.sells);
 
-  const buys1h = number(txns.h1 && txns.h1.buys);
-  const sells1h = number(txns.h1 && txns.h1.sells);
+  const buys1h = num(txns.h1 && txns.h1.buys);
+  const sells1h = num(txns.h1 && txns.h1.sells);
 
-  const volume5m = number(volume.m5);
-  const volume1h = number(volume.h1);
+  const volume5m = num(volume.m5);
+  const volume1h = num(volume.h1);
 
-  const total1h = buys1h + sells1h;
-  const buyRatio = total1h > 0
-    ? buys1h / total1h
+  const totalTransactions = buys1h + sells1h;
+
+  const buyRatio = totalTransactions > 0
+    ? buys1h / totalTransactions
     : 0;
 
-  const createdAt = number(pair.pairCreatedAt);
+  const createdAt = num(pair.pairCreatedAt);
+
   const ageMinutes = createdAt > 0
     ? Math.max(0, (Date.now() - createdAt) / 60000)
     : null;
 
   const previous = snapshots.get(address);
-  const acceleration = previous && previous.volume5m > 0
-    ? volume5m / previous.volume5m
-    : 1;
+
+  const acceleration =
+    previous && previous.volume5m > 0
+      ? volume5m / previous.volume5m
+      : 1;
 
   snapshots.set(address, {
     volume5m,
@@ -378,11 +453,16 @@ function calculatePool(address, pair, mint) {
     risks.push("VOLUME FAIBLE");
   }
 
-  if (ageMinutes !== null && ageMinutes < CONFIG.MIN_AGE_MINUTES) {
+  if (
+    ageMinutes !== null &&
+    ageMinutes < CONFIG.MIN_AGE_MINUTES
+  ) {
     risks.push("TOKEN TRÈS RÉCENT");
   }
 
-  if (mint && mint.checked) {
+  if (!mint || !mint.checked) {
+    risks.push("AUTORITÉS NON VÉRIFIÉES");
+  } else {
     if (!mint.initialized) {
       risks.push("MINT NON INITIALISÉ");
     }
@@ -394,11 +474,9 @@ function calculatePool(address, pair, mint) {
     if (mint.freezeAuthorityActive) {
       risks.push("AUTORITÉ FREEZE ACTIVE");
     }
-  } else {
-    risks.push("AUTORITÉS NON VÉRIFIÉES");
   }
 
-  if (buys1h + sells1h < 5) {
+  if (totalTransactions < 5) {
     risks.push("ACTIVITÉ FAIBLE");
   }
 
@@ -406,25 +484,19 @@ function calculatePool(address, pair, mint) {
     risks.push("VOLUME ANORMAL");
   }
 
-  const price = number(pair.priceUsd);
-
-  // Estimation indicative d'impact de prix.
-  // Ce n'est pas une cotation de swap.
-  const estimatedImpact = liquidity > 0
-    ? (CONFIG.TEST_TRADE_USD / (2 * liquidity)) * 100
-    : null;
+  const momentum = num(changes.m5);
 
   let score = 0;
 
   score += Math.min(25, liquidity / 1000);
   score += Math.min(25, volume1h / 1000);
-  score += Math.min(15, (buys1h + sells1h) / 4);
+  score += Math.min(15, totalTransactions / 4);
   score += Math.min(15, buyRatio * 15);
-
-  const momentum = number(change.m5);
   score += Math.max(0, Math.min(10, momentum));
-
-  score += Math.min(10, Math.max(0, acceleration - 1) * 5);
+  score += Math.min(
+    10,
+    Math.max(0, acceleration - 1) * 5
+  );
 
   score = Math.round(Math.min(100, score));
 
@@ -436,33 +508,39 @@ function calculatePool(address, pair, mint) {
     !mint.freezeAuthorityActive
   );
 
-  const basicConditions =
-    liquidity >= CONFIG.MIN_LIQUIDITY_USD &&
-    volume1h >= CONFIG.MIN_VOLUME_1H_USD &&
-    (ageMinutes === null || ageMinutes >= CONFIG.MIN_AGE_MINUTES);
-
   const buyEligible =
     authorityVerified &&
-    basicConditions &&
     risks.length === 0;
 
-  const token = pair.baseToken &&
+  const token =
+    pair.baseToken &&
     pair.baseToken.address === address
       ? pair.baseToken
       : pair.quoteToken;
+
+  const estimatedImpact =
+    liquidity > 0
+      ? CONFIG.TEST_TRADE_USD / (2 * liquidity) * 100
+      : null;
 
   return {
     address,
     shortAddress: shorten(address),
 
-    name: token && token.name ? token.name : "Token Solana",
-    symbol: token && token.symbol ? token.symbol : "UNKNOWN",
+    name: token && token.name
+      ? token.name
+      : "Token Solana",
+
+    symbol: token && token.symbol
+      ? token.symbol
+      : "UNKNOWN",
 
     dex: pair.dexId || "unknown",
     pairAddress: pair.pairAddress || null,
     url: pair.url || null,
 
-    priceUsd: price,
+    priceUsd: num(pair.priceUsd),
+
     liquidityUsd: round(liquidity),
     volume5mUsd: round(volume5m),
     volume1hUsd: round(volume1h),
@@ -474,14 +552,13 @@ function calculatePool(address, pair, mint) {
 
     buyRatio: round(buyRatio * 100),
     change5m: round(momentum),
-    change1h: round(number(change.h1)),
+    change1h: round(num(changes.h1)),
 
     ageMinutes: ageMinutes === null
       ? null
       : round(ageMinutes),
 
     acceleration: round(acceleration),
-
     score,
 
     mintSecurity: mint || {
@@ -489,19 +566,20 @@ function calculatePool(address, pair, mint) {
       error: "Non vérifié"
     },
 
-    risks,
-
     authorityVerified,
-
+    risks,
     buyEligible,
 
     sellability: "NON VÉRIFIÉE",
 
     simulation: {
       tradeAmountUsd: CONFIG.TEST_TRADE_USD,
-      estimatedImpactPercent: estimatedImpact === null
-        ? null
-        : round(estimatedImpact, 4),
+
+      estimatedImpactPercent:
+        estimatedImpact === null
+          ? null
+          : round(estimatedImpact, 4),
+
       networkBaseFeeSol: 0.000005,
       priorityFee: "NON INCLUSE",
       swapFee: "NON INCLUSE",
@@ -511,7 +589,7 @@ function calculatePool(address, pair, mint) {
 }
 
 // --------------------------------------------------
-// SCAN PRINCIPAL
+// SCANNER
 // --------------------------------------------------
 
 async function scan() {
@@ -526,19 +604,13 @@ async function scan() {
   scannerState = "SCANNING";
 
   try {
-    const addresses = await discoverTokens();
+    const addresses = await getAddresses();
 
-    if (!addresses.length) {
-      pools = [];
-      scannerState = "OK";
-      lastUpdate = new Date().toISOString();
-      lastError = null;
-      return;
-    }
+    const pairs = await getPairs(addresses);
 
-    const pairs = await fetchTokenPairs(addresses);
-
-    const mintResults = await checkMintAuthorities(addresses);
+    // Helius reste indépendant des limites DEX.
+    const mintResults =
+      await checkMintAuthorities(addresses);
 
     const results = [];
 
@@ -547,10 +619,12 @@ async function scan() {
 
       if (!pair) continue;
 
-      const mint = mintResults.get(address);
-
       results.push(
-        calculatePool(address, pair, mint)
+        analyzePool(
+          address,
+          pair,
+          mintResults.get(address)
+        )
       );
     }
 
@@ -558,15 +632,18 @@ async function scan() {
       if (a.buyEligible !== b.buyEligible) {
         return a.buyEligible ? -1 : 1;
       }
+
       return b.score - a.score;
     });
 
+    // Ne jamais effacer les anciennes données
+    // si un scan échoue.
     pools = results;
+
     lastUpdate = new Date().toISOString();
     lastError = null;
     scannerState = "OK";
 
-    // Nettoyage des anciennes observations.
     for (const [key, value] of snapshots.entries()) {
       if (Date.now() - value.time > 3600000) {
         snapshots.delete(key);
@@ -584,24 +661,40 @@ async function scan() {
     }
   } finally {
     scanning = false;
+    nextScanAt = Math.max(
+      Date.now() + 1000,
+      cooldownUntil,
+      Date.now() + CONFIG.SCAN_INTERVAL
+    );
   }
 }
 
 // --------------------------------------------------
-// AUTOMATISATION
+// DÉMARRAGE ET ARRÊT
 // --------------------------------------------------
 
 function startScanner() {
   if (scanTimer) clearInterval(scanTimer);
+  if (heliusTimer) clearInterval(heliusTimer);
   if (countdownTimer) clearInterval(countdownTimer);
 
   running = true;
+  nextScanAt = Date.now();
 
   scan();
+  checkHelius();
 
   scanTimer = setInterval(() => {
-    scan();
+    if (Date.now() >= cooldownUntil) {
+      scan();
+    }
   }, CONFIG.SCAN_INTERVAL);
+
+  // Helius vérifié toutes les 5 minutes,
+  // sans utiliser l'API DEX.
+  heliusTimer = setInterval(() => {
+    checkHelius();
+  }, 300000);
 
   countdownTimer = setInterval(() => {
     if (cooldownUntil > Date.now()) {
@@ -612,9 +705,7 @@ function startScanner() {
       nextScanInSeconds = Math.max(
         0,
         Math.ceil(
-          (CONFIG.SCAN_INTERVAL -
-            ((Date.now() - new Date(lastUpdate || Date.now()).getTime()) %
-              CONFIG.SCAN_INTERVAL)) / 1000
+          (nextScanAt - Date.now()) / 1000
         )
       );
     }
@@ -624,10 +715,12 @@ function startScanner() {
 function stopScanner() {
   running = false;
 
-  if (scanTimer) clearInterval(scanTimer);
-  if (countdownTimer) clearInterval(countdownTimer);
+  clearInterval(scanTimer);
+  clearInterval(heliusTimer);
+  clearInterval(countdownTimer);
 
   scanTimer = null;
+  heliusTimer = null;
   countdownTimer = null;
 
   scannerState = "STOPPED";
@@ -676,6 +769,17 @@ app.get("/status", (req, res) => {
       lastError: heliusError
     },
 
+    cache: {
+      addresses: cachedAddresses.length,
+      pairs: cachedPairs.length,
+      addressesAgeSeconds: addressesFetchedAt
+        ? Math.floor((Date.now() - addressesFetchedAt) / 1000)
+        : null,
+      pairsAgeSeconds: pairsFetchedAt
+        ? Math.floor((Date.now() - pairsFetchedAt) / 1000)
+        : null
+    },
+
     protections: {
       mintAuthorityCheck: true,
       freezeAuthorityCheck: true,
@@ -701,9 +805,17 @@ app.get("/security", (req, res) => {
   res.json({
     mode: "TEST",
     realTrading: false,
+
     checkedPools: pools.length,
-    eligiblePools: pools.filter(p => p.buyEligible).length,
-    blockedPools: pools.filter(p => !p.buyEligible).length,
+
+    eligiblePools: pools.filter(
+      p => p.buyEligible
+    ).length,
+
+    blockedPools: pools.filter(
+      p => !p.buyEligible
+    ).length,
+
     pools: pools.map(p => ({
       name: p.name,
       symbol: p.symbol,
@@ -753,11 +865,12 @@ app.post("/test/stop", (req, res) => {
 });
 
 // --------------------------------------------------
-// DÉMARRAGE
+// SERVEUR
 // --------------------------------------------------
 
 app.listen(PORT, () => {
-  console.log("CART3R.JAILBREAK démarré sur le port " + PORT);
+  console.log("CART3R.JAILBREAK démarré");
+  console.log("30 POOLS MAXIMUM");
   console.log("MODE TEST - TRADING RÉEL DÉSACTIVÉ");
 
   startScanner();
