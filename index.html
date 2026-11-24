@@ -46,7 +46,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 <body>
 <header>
 <h1>CART3R.JAILBREAK</h1>
-<div class="sub">Scanner Solana • Levier simulé réglable • Trailing stop • Aucun ordre réel</div>
+<div class="sub">Scanner Solana • Levier simulé réglable • Trailing stop • Actualisation automatique 5 secondes • Aucun ordre réel</div>
 </header>
 <main>
 <section class="panel">
@@ -58,7 +58,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 </div>
 <button onclick="applyFilters()">Appliquer les filtres</button>
 <button class="secondary" onclick="loadPools()">Actualiser les données</button>
-<div id="status">Prêt. Appuie sur Actualiser les données.</div>
+<div id="status">Prêt. Actualisation automatique activée.</div>
 </section>
 
 <section class="panel">
@@ -124,6 +124,7 @@ La clôture automatique nécessite un nouveau cours valide.
 <strong>Limites importantes</strong><br>
 Les cours peuvent être retardés, incomplets ou indisponibles.
 Le scanner fonctionne lorsque la page est ouverte et actualisée.
+Safari peut suspendre l'actualisation en arrière-plan.
 Les filtres ne vérifient pas la sécurité des tokens.
 Le levier est uniquement une simulation mathématique : il ne constitue pas un véritable levier de marché et ne reproduit pas les frais, le financement ou les liquidations d'un courtier.
 Le trailing stop ne peut agir qu'après réception d'un nouveau cours ; il ne garantit pas le prix de sortie.
@@ -138,8 +139,11 @@ const STAKE=10;
 const ALLOWED_LEVERAGES=[1,2,3,5];
 const TRAIL_ACTIVATION=10;
 const TRAIL_DISTANCE=5;
+const REFRESH_MS=5000;
 let LEVERAGE=3;
 let allPools=[];
+let loading=false;
+let refreshTimer=null;
 
 const euro=n=>Number(n||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
 const usd=n=>'$'+Number(n||0).toLocaleString('en-US',{maximumFractionDigits:0});
@@ -172,16 +176,35 @@ async function fetchJson(url){
  }finally{clearTimeout(timer);}
 }
 async function loadPools(){
+ if(loading)return;
+ if(document.hidden)return;
+ loading=true;
  const s=document.getElementById('status');s.textContent='Chargement des nouveaux pools…';
  try{
-  const j=await fetchJson(API);allPools=Array.isArray(j.data)?j.data:[];renderPools();
-  await refreshPositionPrices();checkAutoExits();renderWallet();
-  s.textContent='Actualisation terminée. '+allPools.length+' pool(s) reçus.';
- }catch(e){s.textContent='Erreur de chargement : '+(e.name==='AbortError'?'délai dépassé':e.message)+'.';setDiagnostic('Impossible de charger les pools : '+e.message);}
+  const j=await fetchJson(API);allPools=Array.isArray(j.data)?j.data:[];
+  renderPools();
+  await refreshPositionPrices();
+  checkAutoExits();
+  renderWallet();
+  s.textContent='Actualisation terminée • '+allPools.length+' pool(s) reçus • Prochaine vérification dans 5 secondes.';
+ }catch(e){
+  s.textContent='Erreur de chargement : '+(e.name==='AbortError'?'délai dépassé':e.message)+'. Nouvelle tentative automatique.';
+  setDiagnostic('Impossible de charger les pools : '+e.message);
+ }finally{loading=false;}
 }
+function startAutoRefresh(){
+ if(refreshTimer)clearInterval(refreshTimer);
+ refreshTimer=setInterval(()=>{
+  if(!document.hidden&&!loading)loadPools();
+ },REFRESH_MS);
+}
+document.addEventListener('visibilitychange',()=>{
+ if(!document.hidden)loadPools();
+});
 function renderPools(){
  const list=document.getElementById('poolList'),good=passing();
- document.getElementById('received').textContent=allPools.length;document.getElementById('passed').textContent=good.length;
+ document.getElementById('received').textContent=allPools.length;
+ document.getElementById('passed').textContent=good.length;
  if(!allPools.length){list.textContent='Aucune donnée chargée.';return;}
  if(!good.length){list.textContent='Aucun pool ne passe actuellement les trois filtres. La variation 24 h peut être absente.';return;}
  list.innerHTML=good.map(p=>`
@@ -239,10 +262,12 @@ async function refreshPositionPrices(){
  if(!wallet.positions.length){setDiagnostic('Aucune position ouverte à actualiser.');return;}
  let updated=0,failed=0,details=[];const now=new Date().toISOString();
  for(const pos of wallet.positions){
-  pos.freshPrice=false;const address=String(pos.id||'').split('_').pop();
+  pos.freshPrice=false;
+  const address=String(pos.id||'').split('_').pop();
   if(!address){pos.priceStatus='adresse du pool absente';failed++;details.push(pos.name+': adresse absente');continue;}
   try{
-   const url='https://api.geckoterminal.com/api/v2/networks/solana/pools/'+encodeURIComponent(address),j=await fetchJson(url);
+   const url='https://api.geckoterminal.com/api/v2/networks/solana/pools/'+encodeURIComponent(address);
+   const j=await fetchJson(url);
    const value=num(j?.data?.attributes?.base_token_price_usd);
    if(value>0){
     pos.lastPrice=value;pos.lastPriceAt=now;pos.priceStatus='nouveau cours reçu';pos.freshPrice=true;
@@ -254,7 +279,8 @@ async function refreshPositionPrices(){
    }else{pos.priceStatus='prix absent dans la réponse';failed++;details.push(pos.name+': prix absent');}
   }catch(e){pos.priceStatus=e.name==='AbortError'?'délai dépassé':'échec ('+e.message+')';failed++;details.push(pos.name+': '+pos.priceStatus);}
  }
- persist();setDiagnostic(updated+' cours reçu(s) • '+failed+' échec(s). '+details.join(' | '));
+ persist();
+ setDiagnostic(updated+' cours reçu(s) • '+failed+' échec(s). '+details.join(' | '));
 }
 function closePosition(i,reason){
  const p=wallet.positions[i];if(!p)return false;
@@ -318,6 +344,8 @@ function resetWallet(){
  wallet=defaultWallet();LEVERAGE=3;persist();updateLeverageDisplay();renderWallet();renderPools();setDiagnostic('Portefeuille virtuel réinitialisé.');
 }
 updateLeverageDisplay();renderWallet();
+startAutoRefresh();
+loadPools();
 </script>
 </body>
 </html>
