@@ -1,5 +1,5 @@
 {
-  "retrievedAt": "2026-11-25T16:30:54.899Z",
+  "retrievedAt": "2026-11-25T17:25:46.024Z",
   "source": {
     "status": "/status",
     "pools": "/pools"
@@ -9,33 +9,33 @@
     "mode": "TEST",
     "realTrading": false,
     "scanner": "LIVE",
-    "poolsFound": 3,
-    "catalogPools": 3,
+    "poolsFound": 0,
+    "catalogPools": 0,
     "eligiblePools": 0,
-    "lastUpdate": "2026-11-25T16:30:53.904Z",
+    "lastUpdate": null,
     "lastError": null,
     "scanning": false,
     "nextScanInSeconds": 45,
-    "startedAt": "2026-11-25T16:30:51.979Z",
+    "startedAt": "2026-11-25T17:25:45.043Z",
     "discovery": {
       "provider": "HELIUS_LOGS_WEBSOCKET",
       "feeds": 2,
       "callsCount": 2,
-      "successCount": 3,
+      "successCount": 0,
       "failureCount": 0,
-      "lastCheck": "2026-11-25T16:30:53.904Z",
+      "lastCheck": "2026-11-25T17:25:45.545Z",
       "lastError": null,
-      "cachedFeeds": 3
+      "cachedFeeds": 0
     },
     "helius": {
       "configured": true,
       "connected": true,
       "subscriptions": 2,
-      "lastCheck": "2026-11-25T16:30:53.904Z",
-      "lastSlot": 473814045,
+      "lastCheck": null,
+      "lastSlot": null,
       "lastError": null,
-      "transactionsSeen": 6,
-      "swapsDecoded": 3,
+      "transactionsSeen": 0,
+      "swapsDecoded": 0,
       "reconnects": 0,
       "rpc429Retries": 0,
       "droppedQueuedTransactions": 0
@@ -68,123 +68,8 @@
       "realTrading": false
     }
   },
-  "count": 3,
+  "count": 0,
   "eligibleCount": 0,
   "liquidityVerifiedCount": 0,
-  "pools": [
-    {
-      "mint": "AnimeXV38KBcwkdf8sQ3XES9pW6BiyCQPLUHvCrpTXgi",
-      "poolAddress": "9f6eDcAavBxbXnJXgZKNTfPt23dMKgqG9YG76CyRL4tk",
-      "name": "Anime",
-      "symbol": "ANIME",
-      "dex": "DEX Solana",
-      "liquidityVerified": false,
-      "liquiditySol": null,
-      "estimatedLiquiditySol": null,
-      "quoteReserveSol": null,
-      "quoteLiquidity": null,
-      "quoteMint": "So11111111111111111111111111111111111111112",
-      "volumeSol": 0.004627,
-      "volumeUsd": null,
-      "activityCount": 1,
-      "buyCount": 0,
-      "sellCount": 1,
-      "buyersCount": 0,
-      "buyPressure": 0,
-      "buyPressureByVolume": 0,
-      "buyVolumeSol": 0,
-      "sellVolumeSol": 0.004627,
-      "score": 0,
-      "eligible": false,
-      "checkedAt": null,
-      "securityChecked": false,
-      "securityRisks": [],
-      "risks": [
-        "Analyse en cours"
-      ],
-      "quotes": {
-        "buyOk": false,
-        "sellOk": false,
-        "roundTripLossPct": null,
-        "error": null,
-        "quoteLadder": []
-      }
-    },
-    {
-      "mint": "EzahUvB1uCVDiXzXhqWULdtsX3umMn5C8SyxWtYJLD6u",
-      "poolAddress": "7GcLtCLmDMoZbJkJLu9pbb6Lby5rMVbMhhauK8N65Hva",
-      "name": "ARGENTUM",
-      "symbol": "AGTM",
-      "dex": "DEX Solana",
-      "liquidityVerified": false,
-      "liquiditySol": null,
-      "estimatedLiquiditySol": null,
-      "quoteReserveSol": null,
-      "quoteLiquidity": null,
-      "quoteMint": "So11111111111111111111111111111111111111112",
-      "volumeSol": 11.197884,
-      "volumeUsd": null,
-      "activityCount": 1,
-      "buyCount": 0,
-      "sellCount": 1,
-      "buyersCount": 0,
-      "buyPressure": 0,
-      "buyPressureByVolume": 0,
-      "buyVolumeSol": 0,
-      "sellVolumeSol": 11.197884,
-      "score": 0,
-      "eligible": false,
-      "checkedAt": null,
-      "securityChecked": false,
-      "securityRisks": [],
-      "risks": [
-        "Analyse en cours"
-      ],
-      "quotes": {
-        "buyOk": false,
-        "sellOk": false,
-        "roundTripLossPct": null,
-        "error": null,
-        "quoteLadder": []
-      }
-    },
-    {
-      "mint": "7vYynd1NmHsuLW815giLfy6t2NjAo6J8916jJzkDEujg",
-      "poolAddress": "5DuHjwH897RGirki2mLNe5adVuomYMS7uhBtuACmN2Xh",
-      "name": "plastic crown",
-      "symbol": "PLCROWN",
-      "dex": "DEX Solana",
-      "liquidityVerified": false,
-      "liquiditySol": null,
-      "estimatedLiquiditySol": null,
-      "quoteReserveSol": null,
-      "quoteLiquidity": null,
-      "quoteMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-      "volumeSol": 0,
-      "volumeUsd": 6.533065000000079,
-      "activityCount": 1,
-      "buyCount": 1,
-      "sellCount": 0,
-      "buyersCount": 1,
-      "buyPressure": 100,
-      "buyPressureByVolume": null,
-      "buyVolumeSol": 0,
-      "sellVolumeSol": 0,
-      "score": 0,
-      "eligible": false,
-      "checkedAt": null,
-      "securityChecked": false,
-      "securityRisks": [],
-      "risks": [
-        "Analyse en cours"
-      ],
-      "quotes": {
-        "buyOk": false,
-        "sellOk": false,
-        "roundTripLossPct": null,
-        "error": null,
-        "quoteLadder": []
-      }
-    }
-  ]
+  "pools": []
 }
