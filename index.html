@@ -16,7 +16,7 @@ label{display:block;color:var(--muted);font-size:10px;margin-bottom:5px}input,se
 @media(max-width:620px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.fields{grid-template-columns:1fr}.field.full{grid-column:auto}.posgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.brand{font-size:19px}}
 </style></head><body><div class="wrap">
 <header><div><div class="brand">CART3R.JAILBREAK</div><div class="sub">SOLANA · HELIUS ON-CHAIN · JUPITER SWAP V2</div></div><div class="topright"><span id="mode" class="pill warn">SCANNER + SIMULATION</span></div></header>
-<nav><button class="active" data-tab="scanner">Scanner</button><button data-tab="simulation">Simulation</button></nav>
+<nav><button class="active" data-tab="scanner">Scanner</button><button data-tab="simulation">Simulation</button><button data-tab="auto">Auto Trader</button><button data-tab="news">News</button></nav>
 <main>
 <section id="tab-scanner">
  <div class="panel"><div class="head"><h2>Vue d'ensemble</h2><span class="tiny muted" id="updated">Connexion…</span></div>
@@ -34,7 +34,29 @@ label{display:block;color:var(--muted);font-size:10px;margin-bottom:5px}input,se
  <div class="panel"><div class="head"><h2>Positions simulées</h2><span id="simCount" class="tiny muted">0 position</span></div><div id="simPositions" class="empty">Aucune position simulée.</div></div>
  <div class="panel"><h2>Historique</h2><div id="simHistory" class="empty">Aucune opération.</div></div>
 </section>
-\n<div class="foot">CART3R.JAILBREAK · Données Render / Helius / Jupiter · Les actifs numériques sont risqués. Aucun rendement n'est garanti.</div>
+\n
+<section id="tab-auto" class="hidden">
+ <div class="panel"><div class="head"><h2>Auto Trader · Simulation</h2><span id="autoState" class="badge bad">PAUSED</span></div>
+ <div class="status ok">Simulation uniquement : aucun ordre réel, aucune signature Phantom et aucun SOL réel dépensé. Le moteur tourne sur Render même lorsque le site est fermé.</div>
+ <div class="fields" style="margin-top:12px">
+ <div class="field full"><label>Code de contrôle (AUTO_CONTROL_TOKEN configuré sur Render)</label><input id="autoToken" type="password" autocomplete="off" placeholder="Code de contrôle privé"></div>
+ <div class="field"><label>Capital fictif (SOL)</label><input id="autoInitial" type="number" min=".1" value="10" step=".1"></div>
+ <div class="field"><label>Achat par position (SOL)</label><input id="autoOrder" type="number" min=".001" value=".05" step=".001"></div>
+ <div class="field"><label>Stop-loss (%)</label><input id="autoSL" type="number" min=".1" max="99" value="10" step=".1"></div>
+ <div class="field"><label>Take-profit (%)</label><input id="autoTP" type="number" min=".1" value="25" step=".1"></div>
+ <div class="field"><label>Score minimum / 100</label><input id="autoScore" type="number" min="0" max="100" value="75"></div>
+ <div class="field"><label>Nombre max de positions</label><input id="autoMax" type="number" min="1" max="20" value="3"></div>
+ <div class="field full"><label>Perte maximale journalière (SOL)</label><input id="autoDailyLoss" type="number" min="0" value=".5" step=".01"></div>
+ </div>
+ <div class="actions"><button id="autoSave">Enregistrer</button><button id="autoStart">Démarrer</button><button id="autoStop" class="danger">Arrêter les nouvelles entrées</button><button id="autoRefresh" class="secondary">Actualiser</button></div>
+ <div id="autoMessage" class="status warn">Chargement du moteur…</div>
+ <div class="stats" style="margin-top:12px"><div class="stat"><small>Solde fictif</small><b id="autoCash">—</b></div><div class="stat"><small>Positions</small><b id="autoPositionsCount">0</b></div><div class="stat"><small>Valeur positions</small><b id="autoValue">—</b></div><div class="stat"><small>PnL réalisé aujourd'hui</small><b id="autoDailyPnl">—</b></div></div></div>
+ <div class="panel"><div class="head"><h2>Positions automatiques</h2></div><div id="autoPositions" class="empty">Aucune position.</div></div>
+ <div class="panel"><div class="head"><h2>Historique automatique</h2></div><div id="autoHistory" class="empty">Aucune opération.</div></div>
+</section>
+<section id="tab-news" class="hidden"><div class="panel"><div class="head"><h2>Crypto News Intelligence</h2><button id="newsRefresh" class="secondary">Actualiser</button></div><div id="newsUpdated" class="tiny muted">CoinDesk · Cointelegraph · Decrypt</div><div id="newsList" class="empty">Chargement des actualités…</div></div></section>
+
+<div class="foot">CART3R.JAILBREAK · Données Render / Helius / Jupiter · Les actifs numériques sont risqués. Aucun rendement n'est garanti.</div>
 </main></div>
 <script>
 'use strict';
@@ -43,7 +65,7 @@ const SOL='So11111111111111111111111111111111111111112';
 const $=id=>document.getElementById(id);
 const state={pools:[]};
 function setTab(name){
-  const valid=['scanner','simulation'];
+  const valid=['scanner','simulation','auto','news'];
   if(!valid.includes(name))return;
   valid.forEach(tab=>{
     const section=$('tab-'+tab);
@@ -91,6 +113,34 @@ $('simRefresh').onclick=async()=>{const b=$('simRefresh');b.disabled=true;try{aw
 $('simReset').onclick=()=>{if(!confirm('Effacer les positions et l’historique fictifs ?'))return;const capital=Math.max(.01,Math.min(100000,Number($('simInitial').value)||10));sim.initial=capital;sim.balance=capital;sim.positions=[];sim.history=[];sim.alerts.clear();simSave();renderSimulation();simMsg('Portefeuille réinitialisé à '+capital+' SOL fictifs.')};
 $('simInitial').onchange=()=>{if(sim.positions.length){$('simInitial').value=sim.initial;simMsg('Vends ou réinitialise les positions avant de changer le capital initial.','warn');return}const n=Math.max(.01,Math.min(100000,Number($('simInitial').value)||10));sim.initial=n;sim.balance=n;simSave();renderSimulation()};
 simLoad();renderSimulation();setInterval(()=>{if(!$('tab-simulation').classList.contains('hidden')&&sim.positions.length)simRefreshPrices()},30000);
+
+
+/* Server-side paper trading controls; token stays on this browser. */
+const AUTO_TOKEN_KEY='cart3r_auto_control_v1';
+$('autoToken').value=localStorage.getItem(AUTO_TOKEN_KEY)||'';
+function autoHeaders(){const t=$('autoToken').value.trim();if(t)localStorage.setItem(AUTO_TOKEN_KEY,t);return {'x-cart3r-control':t};}
+async function autoApi(p,o={}){const r=await fetch(API+p,{cache:'no-store',...o,headers:{'content-type':'application/json',...(o.headers||{})}});const j=await r.json().catch(()=>({}));if(!r.ok||j.ok===false)throw Error(j.error||'HTTP '+r.status);return j;}
+function autoMsg(s,t='ok'){$('autoMessage').className='status '+t;$('autoMessage').textContent=s;}
+function renderAuto(d){
+ $('autoState').textContent=d.active?'RUNNING':'PAUSED';$('autoState').className='badge '+(d.active?'good':'bad');
+ $('autoCash').textContent=fmt(d.config.cashSol,5)+' SOL';$('autoPositionsCount').textContent=d.positions.length;
+ $('autoValue').textContent=fmt(d.positions.reduce((s,p)=>s+Number(p.currentValueSol||p.entrySol||0),0),5)+' SOL';
+ $('autoDailyPnl').textContent=(d.dailyPnlSol>=0?'+':'')+fmt(d.dailyPnlSol,5)+' SOL';$('autoDailyPnl').className=d.dailyPnlSol>=0?'green':'red';
+ $('autoPositions').innerHTML=d.positions.length?d.positions.map(p=>'<article class="pos"><div class="row"><b>'+esc(p.name||p.symbol||short(p.mint))+'</b><span class="badge '+(Number(p.pnlPct)>=0?'good':'bad')+'">'+(p.pnlPct>=0?'+':'')+fmt(p.pnlPct,2)+'%</span></div><div class="posgrid"><div class="datum"><small>Entrée</small><b>'+fmt(p.entrySol,5)+' SOL</b></div><div class="datum"><small>Valeur</small><b>'+fmt(p.currentValueSol,5)+' SOL</b></div><div class="datum"><small>Score</small><b>'+esc(p.score)+'/100</b></div></div><div class="tokenmeta">SL -'+esc(p.stopLossPct)+'% · TP +'+esc(p.takeProfitPct)+'% · News '+esc(p.newsSentiment)+' · '+new Date(p.openedAt).toLocaleString('fr-FR')+(p.quoteError?' · '+esc(p.quoteError):'')+'</div></article>').join(''):'<div class="empty">Aucune position automatique ouverte.</div>';
+ $('autoHistory').innerHTML=d.history.length?d.history.slice(0,30).map(x=>'<div class="token"><div class="row"><b>'+esc(x.type==='AUTO_OPEN'?'ACHAT SIMULÉ':'VENTE SIMULÉE')+' · '+esc(x.symbol||short(x.mint))+'</b><span class="tiny muted">'+new Date(x.openedAt||x.closedAt).toLocaleString('fr-FR')+'</span></div><div class="tokenmeta">'+(x.type==='AUTO_OPEN'?'Montant '+fmt(x.entrySol,5)+' SOL · Score '+esc(x.score):'Résultat '+(x.pnlSol>=0?'+':'')+fmt(x.pnlSol,6)+' SOL · '+esc(x.reason))+'</div></div>').join(''):'<div class="empty">Aucune opération.</div>';
+ autoMsg('Dernier cycle : '+(d.lastTickAt?new Date(d.lastTickAt).toLocaleTimeString('fr-FR'):'en attente')+' · Stockage : '+d.storage+(d.lastError?' · '+d.lastError:''),d.lastError?'warn':'ok');
+}
+async function refreshAuto(){try{const d=await autoApi('/auto/status');renderAuto(d);$('autoInitial').value=d.config.initialSol;$('autoOrder').value=d.config.orderSol;$('autoSL').value=d.config.stopLossPct;$('autoTP').value=d.config.takeProfitPct;$('autoScore').value=d.config.minScore;$('autoMax').value=d.config.maxPositions;$('autoDailyLoss').value=d.config.maxDailyLossSol;}catch(e){autoMsg(e.message,'err')}}
+function autoConfigBody(){return{initialSol:Number($('autoInitial').value),orderSol:Number($('autoOrder').value),stopLossPct:Number($('autoSL').value),takeProfitPct:Number($('autoTP').value),minScore:Number($('autoScore').value),maxPositions:Number($('autoMax').value),maxDailyLossSol:Number($('autoDailyLoss').value)}}
+$('autoSave').onclick=async()=>{try{const d=await autoApi('/auto/config',{method:'POST',headers:autoHeaders(),body:JSON.stringify(autoConfigBody())});renderAuto(d);autoMsg('Réglages enregistrés.','ok')}catch(e){autoMsg(e.message,'err')}};
+$('autoStart').onclick=async()=>{try{const d=await autoApi('/auto/start',{method:'POST',headers:autoHeaders(),body:'{}'});renderAuto(d);autoMsg('Moteur automatique démarré en simulation.','ok')}catch(e){autoMsg(e.message,'err')}};
+$('autoStop').onclick=async()=>{try{const d=await autoApi('/auto/stop',{method:'POST',headers:autoHeaders(),body:'{}'});renderAuto(d);autoMsg('Nouvelles entrées arrêtées. Les positions ouvertes restent surveillées.','ok')}catch(e){autoMsg(e.message,'err')}};
+$('autoRefresh').onclick=refreshAuto;
+async function refreshNews(){try{const d=await autoApi('/auto/news');$('newsUpdated').textContent='Actualités mises à jour : '+(d.updatedAt?new Date(d.updatedAt).toLocaleString('fr-FR'):'—');$('newsList').innerHTML=d.news.length?d.news.map(n=>'<article class="token"><div class="row"><b>'+esc(n.title)+'</b><span class="badge '+(n.sentiment>0?'good':n.sentiment<0?'bad':'')+'">'+(n.sentiment>0?'POSITIF':n.sentiment<0?'NÉGATIF':'NEUTRE')+'</span></div><div class="tokenmeta">'+esc(n.source)+' · '+esc(n.publishedAt||'Date inconnue')+' · '+esc(n.description)+'</div>'+(n.link?'<a class="link" href="'+esc(n.link)+'" target="_blank" rel="noopener">Lire la source ↗</a>':'')+'</article>').join(''):'<div class="empty">Aucune actualité reçue. Les flux peuvent être temporairement indisponibles.</div>';}catch(e){$('newsList').textContent='Erreur actualités : '+e.message;}}
+$('newsRefresh').onclick=refreshNews;
+refreshAuto();refreshNews();
+setInterval(()=>{if(!$('tab-auto').classList.contains('hidden'))refreshAuto();},15000);
+setInterval(()=>{if(!$('tab-news').classList.contains('hidden'))refreshNews();},60000);
 
 refreshScanner();setInterval(refreshScanner,15000);
 </script></body></html>

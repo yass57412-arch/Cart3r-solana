@@ -21,7 +21,7 @@ app.use(express.json({ limit: "100kb" }));
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Cart3r-Control");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
@@ -1175,6 +1175,120 @@ app.post("/test/stop", (_req, res) => {
   state.helius.connected = false;
   res.json({ ok: true, running: false, mode: "TEST", realTrading: false });
 });
+
+
+/* CART3R AUTO PAPER TRADER — server-side simulation only. */
+const fs = require("fs");
+const path = require("path");
+const PAPER_FILE = process.env.PAPER_STATE_FILE || "/var/data/cart3r-paper.json";
+const AUTO_CONTROL_TOKEN = String(process.env.AUTO_CONTROL_TOKEN || "");
+const PAPER_DEFAULTS = { enabled:false, initialSol:10, cashSol:10, orderSol:0.05, stopLossPct:10, takeProfitPct:25, minScore:75, maxPositions:3, maxDailyLossSol:0.5, scanEveryMs:45000 };
+const paper = { config:{...PAPER_DEFAULTS}, positions:[], history:[], news:[], lastNewsAt:0, lastTickAt:null, lastError:null, storage:"unknown", busy:false };
+function savePaper() {
+ const data=JSON.stringify({config:paper.config,positions:paper.positions,history:paper.history.slice(0,250),news:paper.news.slice(0,60),lastNewsAt:paper.lastNewsAt});
+ try { fs.mkdirSync(path.dirname(PAPER_FILE),{recursive:true}); fs.writeFileSync(PAPER_FILE,data,"utf8"); paper.storage=PAPER_FILE; }
+ catch(e) { try { const f=path.join(process.cwd(),"cart3r-paper-state.json"); fs.writeFileSync(f,data,"utf8"); paper.storage="EPHEMERAL:"+f; } catch(x) { paper.storage="ERROR"; paper.lastError="Sauvegarde impossible : "+safeError(x); } }
+}
+function loadPaper() {
+ for(const f of [PAPER_FILE,path.join(process.cwd(),"cart3r-paper-state.json")]) try {
+  if(!fs.existsSync(f)) continue; const d=JSON.parse(fs.readFileSync(f,"utf8"));
+  if(d.config) paper.config={...PAPER_DEFAULTS,...d.config};
+  if(Array.isArray(d.positions)) paper.positions=d.positions;
+  if(Array.isArray(d.history)) paper.history=d.history.slice(0,250);
+  if(Array.isArray(d.news)) paper.news=d.news.slice(0,60);
+  paper.lastNewsAt=Number(d.lastNewsAt)||0; paper.storage=f; return;
+ } catch(e) { paper.lastError="État simulation illisible : "+safeError(e); }
+}
+loadPaper();
+function decodeFeedText(v) { return String(v||"").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1").replace(/<[^>]*>/g," ").replace(/&amp;/g,"&").replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/\s+/g," ").trim().slice(0,900); }
+function feedTag(block,tag) { const m=block.match(new RegExp("<"+tag+"(?:\\s[^>]*)?>([\\s\\S]*?)</"+tag+">","i")); return m?decodeFeedText(m[1]):""; }
+function scoreNews(text) {
+ const s=String(text||"").toLowerCase();
+ const pos=["approval","approved","partnership","launch","integration","adoption","inflow","surge","upgrade","bullish","record high","listing","acquisition","funding","etf"];
+ const neg=["hack","exploit","scam","lawsuit","ban","investigation","breach","stolen","rug pull","rugpull","outage","delist","bankruptcy","insolvency","fraud","drain","vulnerability"];
+ let p=0,n=0; for(const w of pos)if(s.includes(w))p++; for(const w of neg)if(s.includes(w))n++;
+ return Math.max(-1,Math.min(1,(p-n*1.5)/Math.max(2,p+n)));
+}
+async function refreshCryptoNews(force=false) {
+ if(!force&&Date.now()-paper.lastNewsAt<300000)return paper.news;
+ const feeds=[{name:"CoinDesk",url:"https://www.coindesk.com/arc/outboundfeeds/rss/"},{name:"Cointelegraph",url:"https://cointelegraph.com/rss"},{name:"Decrypt",url:"https://decrypt.co/feed"}];
+ const all=[];
+ await Promise.all(feeds.map(async f=>{let timer;try{
+  const c=new AbortController();timer=setTimeout(()=>c.abort(),9000);
+  const r=await fetch(f.url,{signal:c.signal,headers:{"user-agent":"CART3R-JAILBREAK/1.0"}});clearTimeout(timer);
+  if(!r.ok)throw new Error("HTTP "+r.status);const xml=await r.text();const blocks=xml.match(/<(item|entry)\b[\s\S]*?<\/(item|entry)>/gi)||[];
+  for(const b of blocks.slice(0,20)){const title=feedTag(b,"title"),description=feedTag(b,"description")||feedTag(b,"summary")||feedTag(b,"content");
+   const link=feedTag(b,"link")||((b.match(/<link[^>]+href=["']([^"']+)/i)||[])[1]||"");
+   const published=feedTag(b,"pubDate")||feedTag(b,"published")||feedTag(b,"updated");if(!title)continue;
+   all.push({source:f.name,title,description,link,publishedAt:published||null,sentiment:scoreNews(title+" "+description),fetchedAt:new Date().toISOString()});
+  }
+ }catch(e){if(timer)clearTimeout(timer);}}));
+ const unique=new Map();for(const n of all)unique.set(n.title.toLowerCase(),n);
+ paper.news=[...unique.values()].sort((a,b)=>Date.parse(b.publishedAt||0)-Date.parse(a.publishedAt||0)).slice(0,60);
+ paper.lastNewsAt=Date.now();savePaper();return paper.news;
+}
+function newsSignalFor(p) {
+ const symbol=String(p.symbol||"").toLowerCase().replace(/[^a-z0-9]/g,""),name=String(p.name||"").toLowerCase();
+ const matches=paper.news.filter(n=>{const h=(n.title+" "+n.description).toLowerCase();return(symbol.length>=3&&h.includes(symbol))||(name.length>=5&&h.includes(name));}).slice(0,8);
+ return {sentiment:matches.length?Number((matches.reduce((s,n)=>s+n.sentiment,0)/matches.length).toFixed(2)):0,count:matches.length,articles:matches};
+}
+function paperDailyPnl(){const day=new Date().toISOString().slice(0,10);return paper.history.filter(x=>x.type==="AUTO_CLOSE"&&String(x.closedAt||"").slice(0,10)===day).reduce((s,x)=>s+Number(x.pnlSol||0),0);}
+function paperPublicState(){return{ok:true,mode:"PAPER_ONLY",realTrading:false,controlConfigured:Boolean(AUTO_CONTROL_TOKEN),config:{...paper.config},active:Boolean(paper.config.enabled),positions:paper.positions,history:paper.history.slice(0,80),news:paper.news.slice(0,30),newsUpdatedAt:paper.lastNewsAt?new Date(paper.lastNewsAt).toISOString():null,lastTickAt:paper.lastTickAt,lastError:paper.lastError,dailyPnlSol:Number(paperDailyPnl().toFixed(6)),storage:paper.storage,running:true};}
+function requireAutoControl(req,res,next){
+ if(!AUTO_CONTROL_TOKEN)return res.status(503).json({ok:false,error:"AUTO_CONTROL_TOKEN doit être configuré dans Render avant de modifier le bot."});
+ const supplied=String(req.get("x-cart3r-control")||"");
+ if(supplied.length!==AUTO_CONTROL_TOKEN.length||!crypto.timingSafeEqual(Buffer.from(supplied),Buffer.from(AUTO_CONTROL_TOKEN)))return res.status(401).json({ok:false,error:"Code de contrôle incorrect."});
+ next();
+}
+function validatePaperConfig(body){
+ const next={...paper.config};const keys=["initialSol","orderSol","stopLossPct","takeProfitPct","minScore","maxPositions","maxDailyLossSol"];
+ for(const k of keys)if(body[k]!=null){const n=Number(body[k]);if(!Number.isFinite(n))throw new Error("Valeur invalide : "+k);next[k]=n;}
+ if(next.initialSol<.1||next.initialSol>100000)throw new Error("Capital fictif : 0,1 à 100000 SOL.");
+ if(next.orderSol<.001||next.orderSol>next.initialSol)throw new Error("Montant par position invalide.");
+ if(next.stopLossPct<.1||next.stopLossPct>99)throw new Error("Stop-loss : 0,1 à 99 %.");
+ if(next.takeProfitPct<.1||next.takeProfitPct>1000)throw new Error("Take-profit : 0,1 à 1000 %.");
+ if(next.minScore<0||next.minScore>100)throw new Error("Score minimum : 0 à 100.");
+ if(!Number.isInteger(next.maxPositions)||next.maxPositions<1||next.maxPositions>20)throw new Error("Positions max : 1 à 20.");
+ if(next.maxDailyLossSol<0||next.maxDailyLossSol>next.initialSol)throw new Error("Limite de perte journalière invalide.");
+ return next;
+}
+async function closePaperPosition(p,q,reason){
+ const proceeds=Number(q.outAmount)/1e9;if(!Number.isFinite(proceeds)||proceeds<=0)throw new Error("Cotation de sortie invalide.");
+ const pnl=proceeds-Number(p.entrySol);paper.config.cashSol=Number((paper.config.cashSol+proceeds).toFixed(9));
+ paper.history.unshift({type:"AUTO_CLOSE",reason,mint:p.mint,symbol:p.symbol,openedAt:p.openedAt,closedAt:new Date().toISOString(),entrySol:p.entrySol,proceedsSol:proceeds,pnlSol:Number(pnl.toFixed(9)),pnlPct:Number((pnl/p.entrySol*100).toFixed(2))});
+ paper.positions=paper.positions.filter(x=>x.id!==p.id);savePaper();
+}
+async function runPaperTrader(){
+ if(paper.busy)return;paper.busy=true;
+ try{
+  await refreshCryptoNews(false);
+  for(const p of [...paper.positions])try{
+   const q=await jupiterOrder(p.mint,SOL_MINT,String(p.rawAmount)),v=Number(q.outAmount)/1e9;
+   if(!Number.isFinite(v)||v<=0)continue;p.currentValueSol=Number(v.toFixed(9));p.pnlPct=Number(((v/p.entrySol-1)*100).toFixed(2));p.lastQuoteAt=new Date().toISOString();p.quoteError=null;
+   if(p.pnlPct<=-p.stopLossPct)await closePaperPosition(p,q,"STOP_LOSS");else if(p.pnlPct>=p.takeProfitPct)await closePaperPosition(p,q,"TAKE_PROFIT");else savePaper();
+  }catch(e){p.quoteError=safeError(e);paper.lastError="Surveillance "+p.symbol+" : "+safeError(e);}
+  if(paper.config.enabled&&paper.positions.length<paper.config.maxPositions&&paperDailyPnl()>-paper.config.maxDailyLossSol&&JUPITER_API_KEY){
+   const candidates=[...state.pools.values()].filter(p=>p.eligible&&p.score>=paper.config.minScore).sort((a,b)=>b.score-a.score);
+   for(const c of candidates){
+    if(paper.positions.length>=paper.config.maxPositions)break;if(paper.positions.some(p=>p.mint===c.mint))continue;
+    const signal=newsSignalFor(c);if(signal.sentiment<=-.25)continue;if(paper.config.cashSol<paper.config.orderSol)break;
+    try{
+     const q=await jupiterOrder(SOL_MINT,c.mint,String(Math.round(paper.config.orderSol*1e9)));if(!q.outAmount||Number(q.outAmount)<=0)continue;
+     const p={id:c.mint+":"+Date.now(),mint:c.mint,name:c.name,symbol:c.symbol,rawAmount:String(q.outAmount),entrySol:paper.config.orderSol,currentValueSol:paper.config.orderSol,stopLossPct:paper.config.stopLossPct,takeProfitPct:paper.config.takeProfitPct,score:c.score,newsSentiment:signal.sentiment,newsMatches:signal.count,openedAt:new Date().toISOString(),lastQuoteAt:new Date().toISOString()};
+     paper.config.cashSol=Number((paper.config.cashSol-paper.config.orderSol).toFixed(9));paper.positions.push(p);paper.history.unshift({type:"AUTO_OPEN",mint:p.mint,symbol:p.symbol,openedAt:p.openedAt,entrySol:p.entrySol,score:p.score,newsSentiment:p.newsSentiment});savePaper();
+    }catch(e){paper.lastError="Ouverture "+c.symbol+" : "+safeError(e);}
+   }
+  }
+  paper.lastTickAt=new Date().toISOString();
+ }catch(e){paper.lastError=safeError(e);}finally{paper.busy=false;savePaper();}
+}
+app.get("/auto/status",(_req,res)=>res.json(paperPublicState()));
+app.get("/auto/news",async(_req,res)=>{try{await refreshCryptoNews(false);res.json({ok:true,news:paper.news,updatedAt:paper.lastNewsAt?new Date(paper.lastNewsAt).toISOString():null});}catch(e){res.status(502).json({ok:false,error:safeError(e),news:paper.news});}});
+app.post("/auto/config",requireAutoControl,(req,res)=>{try{const n=validatePaperConfig(req.body||{});if(paper.positions.length&&n.initialSol!==paper.config.initialSol)return res.status(409).json({ok:false,error:"Ferme les positions avant de modifier le capital initial."});if(!paper.positions.length&&n.initialSol!==paper.config.initialSol)n.cashSol=n.initialSol;paper.config=n;savePaper();res.json(paperPublicState());}catch(e){res.status(400).json({ok:false,error:safeError(e)});}});
+app.post("/auto/start",requireAutoControl,(_req,res)=>{if(!JUPITER_API_KEY)return res.status(503).json({ok:false,error:"JUPITER_API_KEY absente : cotations indisponibles."});paper.config.enabled=true;paper.lastError=null;savePaper();res.json(paperPublicState());});
+app.post("/auto/stop",requireAutoControl,(_req,res)=>{paper.config.enabled=false;savePaper();res.json(paperPublicState());});
+app.post("/auto/reset",requireAutoControl,(req,res)=>{if(paper.positions.length)return res.status(409).json({ok:false,error:"Clôture les positions avant de réinitialiser le portefeuille."});const n=Math.max(.1,Math.min(100000,Number(req.body?.initialSol)||paper.config.initialSol));paper.config={...PAPER_DEFAULTS,initialSol:n,cashSol:n};paper.history=[];paper.lastError=null;savePaper();res.json(paperPublicState());});
+setInterval(runPaperTrader,45000);setTimeout(runPaperTrader,12000);
 
 const server = app.listen(PORT, () => {
   console.log("CART3R Helius scanner listening on", PORT, "mode=TEST realTrading=false");
