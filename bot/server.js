@@ -20,7 +20,7 @@ app.use(express.json({ limit: "100kb" }));
 // Only GET/OPTIONS are allowed; this does not expose trading or write endpoints.
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
@@ -1032,6 +1032,80 @@ app.get("/", (_req, res) => res.json({
 }));
 
 app.get("/health", (_req, res) => res.json({ ok: true, service: "CART3R", mode: "TEST", realTrading: false }));
+
+const tradeOrders = new Map();
+const tradeRate = new Map();
+function tradeLimit(req, res, next) {
+  const key = req.ip || req.socket?.remoteAddress || "unknown";
+  const t = Date.now(), prior = tradeRate.get(key) || [];
+  const recent = prior.filter(x => t - x < 10000);
+  if (recent.length >= 12) return res.status(429).json({ ok:false, error:"Trop de requêtes trading. Réessaie dans quelques secondes." });
+  recent.push(t); tradeRate.set(key, recent); next();
+}
+const validBase58 = value => typeof value === "string" && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
+async function jupiterRequest(path, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (JUPITER_API_KEY) headers["x-api-key"] = JUPITER_API_KEY;
+  const response = await fetch("https://api.jup.ag/swap/v2" + path, { ...options, headers });
+  const body = await response.text();
+  let json = {};
+  try { json = body ? JSON.parse(body) : {}; } catch (_) {}
+  if (!response.ok) throw new Error("Jupiter HTTP " + response.status + ": " + (json.error || json.message || body.slice(0,180)));
+  return json;
+}
+app.get("/wallet", tradeLimit, async (req, res) => {
+  const address = String(req.query.address || "");
+  if (!validBase58(address)) return res.status(400).json({ok:false,error:"Adresse wallet invalide"});
+  try {
+    const [lamports, accounts] = await Promise.all([
+      heliusRpc("getBalance", [address, { commitment:"confirmed" }]),
+      heliusRpc("getTokenAccountsByOwner", [address, { programId:TOKEN_PROGRAM }, { encoding:"jsonParsed", commitment:"confirmed" }])
+    ]);
+    const tokens = (accounts?.value || []).map(row => {
+      const info = row.account?.data?.parsed?.info;
+      const amount = info?.tokenAmount || {};
+      return { mint:info?.mint, amount:amount.amount || "0", uiAmount:amount.uiAmountString || amount.uiAmount || "0", decimals:Number(amount.decimals || 0), tokenAccount:row.pubkey };
+    }).filter(x => x.mint && BigInt(x.amount || "0") > 0n);
+    res.json({ok:true,address,sol:Number(lamports?.value || 0)/1e9,lamports:String(lamports?.value || 0),tokens,checkedAt:new Date().toISOString()});
+  } catch(e) { res.status(502).json({ok:false,error:safeError(e)}); }
+});
+app.get("/trade/quote", tradeLimit, async (req,res) => {
+  const inputMint=String(req.query.inputMint||""), outputMint=String(req.query.outputMint||""), amount=String(req.query.amount||"");
+  if (!validBase58(inputMint) || !validBase58(outputMint) || inputMint===outputMint || !/^[1-9][0-9]{0,19}$/.test(amount))
+    return res.status(400).json({ok:false,error:"Paramètres de cotation invalides"});
+  try {
+    const q=new URLSearchParams({inputMint,outputMint,amount});
+    const order=await jupiterRequest("/order?"+q.toString());
+    res.json({ok:true,quote:order,checkedAt:new Date().toISOString()});
+  } catch(e) { res.status(502).json({ok:false,error:safeError(e)}); }
+});
+app.post("/trade/order", tradeLimit, async (req,res) => {
+  const inputMint=String(req.body?.inputMint||""), outputMint=String(req.body?.outputMint||"");
+  const amount=String(req.body?.amount||""), taker=String(req.body?.taker||"");
+  if (!validBase58(inputMint) || !validBase58(outputMint) || inputMint===outputMint || !validBase58(taker) || !/^[1-9][0-9]{0,19}$/.test(amount))
+    return res.status(400).json({ok:false,error:"Paramètres d'ordre invalides"});
+  try {
+    const q=new URLSearchParams({inputMint,outputMint,amount,taker,maxSupportedTransactionVersion:"0"});
+    const order=await jupiterRequest("/order?"+q.toString());
+    if (!order.transaction || !order.requestId) return res.status(422).json({ok:false,error:order.errorMessage||"Jupiter n'a pas construit de transaction signable",router:order.router});
+    tradeOrders.set(order.requestId,{taker,createdAt:Date.now(),order});
+    for (const [id,item] of tradeOrders) if (Date.now()-item.createdAt>120000) tradeOrders.delete(id);
+    res.json({ok:true,order});
+  } catch(e) { res.status(502).json({ok:false,error:safeError(e)}); }
+});
+app.post("/trade/execute", tradeLimit, async (req,res) => {
+  const requestId=String(req.body?.requestId||""), signedTransaction=String(req.body?.signedTransaction||"");
+  const cached=tradeOrders.get(requestId);
+  if (!cached || Date.now()-cached.createdAt>120000) return res.status(410).json({ok:false,error:"Ordre expiré ou inconnu. Demande une nouvelle cotation."});
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signedTransaction) || signedTransaction.length>20000)
+    return res.status(400).json({ok:false,error:"Transaction signée invalide"});
+  tradeOrders.delete(requestId);
+  try {
+    const result=await jupiterRequest("/execute",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({signedTransaction,requestId})});
+    res.json({ok:true,result});
+  } catch(e) { res.status(502).json({ok:false,error:safeError(e)}); }
+});
+
 app.get("/status", (_req, res) => res.json(statusPayload()));
 app.get("/pools", (_req, res) => {
   const list = [...state.pools.values()].map(publicCandidate)
