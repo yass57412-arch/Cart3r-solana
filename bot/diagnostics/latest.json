@@ -1,5 +1,5 @@
 {
-  "retrievedAt": "2026-11-25T05:42:49.622Z",
+  "retrievedAt": "2026-11-25T06:46:20.291Z",
   "source": {
     "status": "/status",
     "pools": "/pools"
@@ -9,33 +9,33 @@
     "mode": "TEST",
     "realTrading": false,
     "scanner": "LIVE",
-    "poolsFound": 0,
-    "catalogPools": 0,
+    "poolsFound": 2,
+    "catalogPools": 2,
     "eligiblePools": 0,
-    "lastUpdate": null,
+    "lastUpdate": "2026-11-25T06:46:19.525Z",
     "lastError": null,
     "scanning": false,
     "nextScanInSeconds": 45,
-    "startedAt": "2026-11-25T05:42:47.956Z",
+    "startedAt": "2026-11-25T06:46:15.568Z",
     "discovery": {
       "provider": "HELIUS_LOGS_WEBSOCKET",
       "feeds": 2,
       "callsCount": 2,
-      "successCount": 0,
+      "successCount": 6,
       "failureCount": 0,
-      "lastCheck": "2026-11-25T05:42:48.454Z",
+      "lastCheck": "2026-11-25T06:46:19.525Z",
       "lastError": null,
-      "cachedFeeds": 0
+      "cachedFeeds": 2
     },
     "helius": {
       "configured": true,
       "connected": true,
       "subscriptions": 2,
-      "lastCheck": null,
-      "lastSlot": null,
+      "lastCheck": "2026-11-25T06:46:19.877Z",
+      "lastSlot": 473650914,
       "lastError": null,
-      "transactionsSeen": 0,
-      "swapsDecoded": 0,
+      "transactionsSeen": 25,
+      "swapsDecoded": 6,
       "reconnects": 0,
       "rpc429Retries": 0,
       "droppedQueuedTransactions": 0
@@ -68,8 +68,85 @@
       "realTrading": false
     }
   },
-  "count": 0,
+  "count": 2,
   "eligibleCount": 0,
   "liquidityVerifiedCount": 0,
-  "pools": []
+  "pools": [
+    {
+      "mint": "3Tg6YnNrfPdFfsY14MaNsDMWLseAyrUDS3myJtbaJN6f",
+      "poolAddress": "CixcofsPwHnYWjsoDxXxvLd6uM5fH7w8MFPL9mpQpqtX",
+      "name": "Basket",
+      "symbol": "BASKET",
+      "dex": "DEX Solana",
+      "liquidityVerified": false,
+      "liquiditySol": null,
+      "estimatedLiquiditySol": null,
+      "quoteReserveSol": null,
+      "quoteLiquidity": null,
+      "quoteMint": "So11111111111111111111111111111111111111112",
+      "volumeSol": 2.283725,
+      "volumeUsd": null,
+      "activityCount": 4,
+      "buyCount": 3,
+      "sellCount": 1,
+      "buyersCount": 3,
+      "buyPressure": 75,
+      "buyPressureByVolume": 46.8,
+      "buyVolumeSol": 1.0693,
+      "sellVolumeSol": 1.214425,
+      "score": 0,
+      "eligible": false,
+      "checkedAt": null,
+      "securityChecked": false,
+      "securityRisks": [],
+      "risks": [
+        "Analyse en cours"
+      ],
+      "quotes": {
+        "buyOk": false,
+        "sellOk": false,
+        "roundTripLossPct": null,
+        "error": null,
+        "quoteLadder": []
+      }
+    },
+    {
+      "mint": "EsQv6x7X2wepuR49gPhEcSfJjgTFVZFAMnCNwtA5T5EV",
+      "poolAddress": "DWbPtRzmGAJXywU6DmbNuWiP4bRuHLRJLJCrrGi7pzHa",
+      "name": "ZBITCO",
+      "symbol": "ZBITCO",
+      "dex": "DEX Solana",
+      "liquidityVerified": false,
+      "liquiditySol": null,
+      "estimatedLiquiditySol": null,
+      "quoteReserveSol": null,
+      "quoteLiquidity": null,
+      "quoteMint": "So11111111111111111111111111111111111111112",
+      "volumeSol": 0.167912,
+      "volumeUsd": null,
+      "activityCount": 2,
+      "buyCount": 1,
+      "sellCount": 1,
+      "buyersCount": 1,
+      "buyPressure": 50,
+      "buyPressureByVolume": 3.6,
+      "buyVolumeSol": 0.006,
+      "sellVolumeSol": 0.161912,
+      "score": 0,
+      "eligible": false,
+      "checkedAt": null,
+      "securityChecked": false,
+      "securityRisks": [],
+      "risks": [
+        "Analyse en cours"
+      ],
+      "quotes": {
+        "buyOk": false,
+        "sellOk": false,
+        "roundTripLossPct": null,
+        "error": null,
+        "quoteLadder": []
+      }
+    }
+  ]
 }
