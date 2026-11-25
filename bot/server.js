@@ -97,10 +97,12 @@ const state = {
     configured: Boolean(JUPITER_API_KEY),
     api: "SWAP_V2_ORDER",
     lastCheck: null,
+    lastRequestAt: null,
     lastSolPriceUsd: null,
     lastSolPriceAt: 0,
     checksCount: 0,
     successCount: 0,
+    rateLimitHits: 0,
     cooldownSeconds: 0,
     lastError: null
   },
@@ -167,15 +169,30 @@ async function fetchJson(url, options = {}, timeoutMs = CONFIG.rpcTimeoutMs) {
     try { json = body ? JSON.parse(body) : {}; } catch (_) {}
     if (!response.ok) {
       const detail = json.error?.message || body.slice(0, 160) || response.statusText;
-      const error = new Error("HTTP " + response.status + ": " + detail);
+        const error = new Error("HTTP " + response.status + ": " + detail);
       error.status = response.status;
       const retryAfter = response.headers.get("retry-after");
+      const resetHeader = response.headers.get("x-ratelimit-reset");
       error.retryAfterMs = retryAfter
         ? (Number.isFinite(Number(retryAfter)) ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now()))
         : 0;
+      error.rateLimitResetAt = resetHeader && Number.isFinite(Number(resetHeader))
+        ? Number(resetHeader) * 1000
+        : 0;
+      error.rateLimitRemaining = Number(response.headers.get("x-ratelimit-remaining"));
       throw error;
     }
     if (body && !Object.keys(json).length) throw new Error("Réponse JSON invalide (HTTP " + response.status + ")");
+    if (json && typeof json === "object") {
+      const resetHeader = response.headers.get("x-ratelimit-reset");
+      Object.defineProperty(json, "__rateLimit", {
+        value: {
+          remaining: Number(response.headers.get("x-ratelimit-remaining")),
+          resetAt: resetHeader && Number.isFinite(Number(resetHeader)) ? Number(resetHeader) * 1000 : 0
+        },
+        enumerable: false
+      });
+    }
     return json;
   } finally {
     clearTimeout(timer);
@@ -526,18 +543,74 @@ async function refreshSolPrice() {
   return price;
 }
 
+// Jupiter Free allows 1 request/second over a 60-second sliding window.
+// CART3R deliberately stays below that ceiling and shares ONE queue across
+// every Jupiter caller (scanner, SOL price refresh and manual test endpoint).
+const JUPITER_MIN_INTERVAL_MS = 1500;
+let jupiterRequestTail = Promise.resolve();
+let jupiterNextRequestAt = 0;
+let jupiterCooldownUntil = 0;
+let jupiterQueueDepth = 0;
+
+function queueJupiterRequest(task) {
+  jupiterQueueDepth++;
+  const run = jupiterRequestTail.then(async () => {
+    try {
+      const waitUntil = Math.max(jupiterNextRequestAt, jupiterCooldownUntil);
+      const waitMs = waitUntil - Date.now();
+      if (waitMs > 0) await sleep(waitMs);
+
+      jupiterNextRequestAt = Date.now() + JUPITER_MIN_INTERVAL_MS;
+      state.jupiter.lastRequestAt = new Date().toISOString();
+      state.jupiter.checksCount++;
+
+      const result = await task();
+      state.jupiter.successCount++;
+
+      const rate = result && result.__rateLimit;
+      if (rate && rate.remaining === 0 && rate.resetAt > Date.now()) {
+        jupiterCooldownUntil = Math.max(jupiterCooldownUntil, rate.resetAt);
+      }
+      return result;
+    } catch (e) {
+      if (e && e.status === 429) {
+        state.jupiter.rateLimitHits++;
+        const resetAt = Number(e.rateLimitResetAt) || 0;
+        const retryAfterAt = e.retryAfterMs > 0 ? Date.now() + e.retryAfterMs : 0;
+        // Prefer Jupiter's exact sliding-window reset; use a conservative
+        // 65-second fallback if the gateway omits its rate-limit headers.
+        jupiterCooldownUntil = Math.max(
+          jupiterCooldownUntil,
+          resetAt,
+          retryAfterAt,
+          Date.now() + 65000
+        );
+        state.jupiter.lastError = safeError(e);
+      }
+      throw e;
+    } finally {
+      jupiterQueueDepth = Math.max(0, jupiterQueueDepth - 1);
+      state.jupiter.cooldownSeconds = Math.max(0, Math.ceil((jupiterCooldownUntil - Date.now()) / 1000));
+    }
+  });
+  jupiterRequestTail = run.catch(() => undefined);
+  return run;
+}
+
 async function jupiterOrder(inputMint, outputMint, amount) {
   if (!JUPITER_API_KEY) throw new Error("JUPITER_API_KEY non configurée");
   const url = new URL("https://api.jup.ag/swap/v2/order");
   url.searchParams.set("inputMint", inputMint);
   url.searchParams.set("outputMint", outputMint);
   url.searchParams.set("amount", String(amount));
-  const json = await fetchJson(url.toString(), {
-    method: "GET",
-    headers: { "accept": "application/json", "x-api-key": JUPITER_API_KEY }
-  }, CONFIG.jupiterTimeoutMs);
-  if (!json || !json.outAmount || Number(json.outAmount) <= 0) throw new Error("Jupiter ne retourne aucun montant de sortie");
-  return json;
+  return queueJupiterRequest(async () => {
+    const json = await fetchJson(url.toString(), {
+      method: "GET",
+      headers: { "accept": "application/json", "x-api-key": JUPITER_API_KEY }
+    }, CONFIG.jupiterTimeoutMs);
+    if (!json || !json.outAmount || Number(json.outAmount) <= 0) throw new Error("Jupiter ne retourne aucun montant de sortie");
+    return json;
+  });
 }
 
 async function verifyPoolLiquidity(p) {
@@ -640,7 +713,6 @@ async function checkCandidate(p) {
   let small = null, medium = null, roundTripLossPct = null;
   if (p.security.checked && p.security.risks.length === 0 && JUPITER_API_KEY) {
     try {
-      state.jupiter.checksCount += 4;
       state.jupiter.lastCheck = new Date().toISOString();
       small = await testRoundTrip(CONFIG.quoteLadderLamports[0], p.mint);
       medium = await testRoundTrip(CONFIG.quoteLadderLamports[1], p.mint);
@@ -657,7 +729,6 @@ async function checkCandidate(p) {
         quoteLadder: [small, medium],
         checkedAt: new Date().toISOString()
       };
-      state.jupiter.successCount += 4;
       state.jupiter.lastError = null;
       if (small.roundTripLossPct > CONFIG.maxRoundTripLossPct || medium.roundTripLossPct > CONFIG.maxRoundTripLossPct) {
         risks.push("Coût aller-retour supérieur à " + CONFIG.maxRoundTripLossPct + "% sur la grille de cotations");
@@ -940,7 +1011,13 @@ function statusPayload() {
     startedAt: state.startedAt,
     discovery: { ...state.discovery, cachedFeeds: pools.length },
     helius: { ...state.helius, configured: Boolean(HELIUS_RPC_URL) },
-    jupiter: { ...state.jupiter, configured: Boolean(JUPITER_API_KEY) },
+    jupiter: {
+      ...state.jupiter,
+      configured: Boolean(JUPITER_API_KEY),
+      cooldownSeconds: Math.max(0, Math.ceil((jupiterCooldownUntil - Date.now()) / 1000)),
+      minIntervalMs: JUPITER_MIN_INTERVAL_MS,
+      queueDepth: jupiterQueueDepth
+    },
     protections: { ...state.protections }
   };
 }
@@ -991,8 +1068,6 @@ app.get("/jupiter-test", async (_req, res) => {
     state.jupiter.lastSolPriceUsd = Number(quote.outAmount) / 1e6;
     state.jupiter.lastSolPriceAt = now();
     state.jupiter.lastError = null;
-    state.jupiter.checksCount++;
-    state.jupiter.successCount++;
     res.json({ ok: true, api: "SWAP_V2_ORDER", inputSol: 1, outputUsdc: state.jupiter.lastSolPriceUsd, checkedAt: state.jupiter.lastCheck, quoteOnly: true });
   } catch (e) {
     state.jupiter.lastError = safeError(e);
