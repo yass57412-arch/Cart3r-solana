@@ -169,7 +169,7 @@ async function fetchJson(url, options = {}, timeoutMs = CONFIG.rpcTimeoutMs) {
     try { json = body ? JSON.parse(body) : {}; } catch (_) {}
     if (!response.ok) {
       const detail = json.error?.message || body.slice(0, 160) || response.statusText;
-        const error = new Error("HTTP " + response.status + ": " + detail);
+      const error = new Error("HTTP " + response.status + ": " + detail);
       error.status = response.status;
       const retryAfter = response.headers.get("retry-after");
       const resetHeader = response.headers.get("x-ratelimit-reset");
@@ -577,14 +577,14 @@ function queueJupiterRequest(task) {
         state.jupiter.rateLimitHits++;
         const resetAt = Number(e.rateLimitResetAt) || 0;
         const retryAfterAt = e.retryAfterMs > 0 ? Date.now() + e.retryAfterMs : 0;
-        // Prefer Jupiter's exact sliding-window reset; use a conservative
-        // 65-second fallback if the gateway omits its rate-limit headers.
-        jupiterCooldownUntil = Math.max(
-          jupiterCooldownUntil,
-          resetAt,
-          retryAfterAt,
-          Date.now() + 65000
-        );
+        // Wait for the exact sliding-window reset (plus a small safety margin).
+        // Only use 65 seconds when Jupiter omits both reset and Retry-After.
+        const recoveryAt = resetAt > Date.now()
+          ? resetAt + 250
+          : retryAfterAt > Date.now()
+            ? retryAfterAt + 250
+            : Date.now() + 65000;
+        jupiterCooldownUntil = Math.max(jupiterCooldownUntil, recoveryAt);
         state.jupiter.lastError = safeError(e);
       }
       throw e;
