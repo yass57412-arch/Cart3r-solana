@@ -49,15 +49,15 @@ const CONFIG = {
   windowMs: 15 * 60 * 1000,
   checkEveryMs: 45 * 1000,
   checkBatch: 5,
-  minSwaps: 5,
+  minSwaps: 4,
   minBuyers: 2,
-  minBuyPressure: 0.55,
-  maxRoundTripLossPct: 8,
+  minBuyPressure: 0.52,
+  maxRoundTripLossPct: 9,
   buyTestLamports: "10000000", // 0.01 SOL — quote only, no order execution
   maxSeenSignatures: 5000,
   maxQueuedSignatures: 500,
   maxConcurrentTransactions: 2,
-  minLiquiditySol: 5,
+  minLiquiditySol: 3,
   quoteLadderLamports: ["10000000", "50000000"], // 0.01 and 0.05 SOL, quote-only
   rpcTimeoutMs: 12000,
   jupiterTimeoutMs: 12000
