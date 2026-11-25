@@ -2,131 +2,117 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#0b1020">
-<title>CART3R.JAILBREAK — Scanner TEST</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#080d18">
+<title>CART3R.JAILBREAK — Dashboard</title>
 <style>
-:root{color-scheme:dark;--bg:#0b1020;--panel:#151d32;--line:#293653;--txt:#edf2ff;--muted:#9eacc8;--green:#35d39a;--red:#ff687d;--amber:#ffcc80;--purple:#c8a8ff}
-*{box-sizing:border-box}body{margin:0;padding:16px;background:var(--bg);color:var(--txt);font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-header,main{max-width:980px;margin:auto}h1{color:var(--green);font-size:25px;margin:4px 0}.sub,.muted{color:var(--muted);font-size:12px;line-height:1.5}
-main{display:grid;gap:14px;margin-top:18px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px}
-h2{font-size:17px;margin:0 0 12px}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
-.stat{background:#0c1427;border:1px solid var(--line);border-radius:10px;padding:11px;min-width:0}.stat small{display:block;color:var(--muted);font-size:11px}.stat strong{display:block;font-size:19px;margin-top:4px;overflow-wrap:anywhere}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.status{margin-top:12px;padding:11px;border-radius:9px;background:#0c1427;border:1px solid var(--line);font-size:13px;line-height:1.5;overflow-wrap:anywhere}
-.safe{color:#a8f3d5;border-color:#287c60}.warn{color:var(--amber);border-color:#805b32}.bad{color:#ffc1ca;border-color:#8c394b}
-.filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}
-input{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0c1427;color:var(--txt);font-size:16px}
-button{border:0;border-radius:9px;padding:11px 14px;background:var(--green);color:#06140f;font-weight:800;margin-top:12px}
-.pool{border-top:1px solid var(--line);padding:14px 0}.pool:first-child{border-top:0}.poolhead{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}.token{font-weight:800;color:var(--green);overflow-wrap:anywhere}
-.pill{border:1px solid var(--line);border-radius:30px;padding:4px 8px;font-size:11px;color:var(--muted)}
-.details{font-size:12px;color:var(--muted);line-height:1.7;margin-top:6px;overflow-wrap:anywhere}.score{color:var(--green);font-weight:800}
-a{color:#8eb5ff;overflow-wrap:anywhere}.empty{color:var(--muted);padding:12px 0}
-@media(max-width:600px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.filters{grid-template-columns:1fr}}
+:root{color-scheme:dark;--bg:#080d18;--panel:#101a2b;--panel2:#0b1423;--line:#22334b;--text:#edf4ff;--muted:#91a3bd;--green:#40e0a0;--amber:#ffca75;--red:#ff7285;--blue:#8bbcff}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -20%,#17304b 0,transparent 55%),var(--bg);color:var(--text);font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:calc(16px + env(safe-area-inset-top)) 14px calc(28px + env(safe-area-inset-bottom))}
+.wrap{max-width:1050px;margin:auto}header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.brand{font-size:23px;font-weight:900;letter-spacing:.5px;color:var(--green)}.subtitle{font-size:10px;color:var(--muted);letter-spacing:1.1px;margin-top:4px}.tag{border:1px solid #286e57;color:var(--green);background:#0d2a22;padding:7px 11px;border-radius:30px;font-size:11px;font-weight:800}
+main{display:grid;gap:13px;margin-top:18px}.panel{background:linear-gradient(145deg,#121e31,#0e1727);border:1px solid var(--line);border-radius:16px;padding:15px;box-shadow:0 8px 28px #0002}.sectionhead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:13px}h2{font-size:15px;margin:0;font-weight:800}.muted{color:var(--muted)}.tiny{font-size:11px;line-height:1.55}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.stat{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:11px;min-width:0}.stat span{display:block;color:var(--muted);font-size:10px}.stat strong{display:block;font-size:19px;margin-top:5px;overflow-wrap:anywhere}.green{color:var(--green)}.amber{color:var(--amber)}.red{color:var(--red)}
+.status{margin-top:12px;border:1px solid var(--line);background:var(--panel2);padding:11px;border-radius:10px;line-height:1.6;font-size:12px;overflow-wrap:anywhere}.status.ok{border-color:#286e57}.status.warn{border-color:#80613a}.status.err{border-color:#813d4b}
+.actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:11px}button{background:var(--green);color:#052015;font-weight:900;border:0;border-radius:9px;padding:10px 14px;font-size:12px}button:disabled{opacity:.5}.filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}label{font-size:10px;color:var(--muted);display:block;margin-bottom:5px}input,select{width:100%;min-width:0;background:#091321;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:10px;font-size:15px}
+.pool{padding:13px 0;border-top:1px solid var(--line)}.pool:first-child{border-top:0}.pooltop{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.name{font-weight:850;font-size:14px;overflow-wrap:anywhere}.score{color:var(--green);font-weight:900;font-size:12px;white-space:nowrap}.pill{display:inline-block;border:1px solid var(--line);border-radius:30px;padding:4px 7px;font-size:10px;color:var(--muted);margin:6px 4px 0 0}.pill.good{color:var(--green);border-color:#286e57}.pill.bad{color:var(--red);border-color:#813d4b}.gridinfo{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:10px}.datum{background:#0a1422;border-radius:8px;padding:8px;min-width:0}.datum small{display:block;color:var(--muted);font-size:9px}.datum b{display:block;font-size:12px;margin-top:4px;overflow-wrap:anywhere}.pooldetails{font-size:11px;line-height:1.65;color:var(--muted);margin-top:8px;overflow-wrap:anywhere}.pooldetails a{color:var(--blue);text-decoration:none}.empty{padding:18px 3px;color:var(--muted);font-size:12px;line-height:1.6}.foot{font-size:10px;color:var(--muted);text-align:center;line-height:1.6;padding:2px 8px}
+@media(max-width:600px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.filters{grid-template-columns:1fr}.gridinfo{grid-template-columns:repeat(2,minmax(0,1fr))}.brand{font-size:20px}}
 </style>
 </head>
-<body>
-<header>
-<h1>CART3R.JAILBREAK</h1>
-<div class="sub">SCANNER SOLANA • HELIUS + JUPITER • MODE TEST • ACHATS ET VENTES DÉSACTIVÉS</div>
-</header>
+<body><div class="wrap">
+<header><div><div class="brand">CART3R.JAILBREAK</div><div class="subtitle">SOLANA ON-CHAIN SCANNER · HELIUS + JUPITER</div></div><div class="tag">● MODE TEST — READ ONLY</div></header>
 <main>
 <section class="panel">
-<h2>État du scanner</h2>
-<div class="stats">
-<div class="stat"><small>Mode</small><strong id="mode">TEST</strong></div>
-<div class="stat"><small>Scanner</small><strong id="scanner">—</strong></div>
-<div class="stat"><small>Pools détectés</small><strong id="poolCount">0</strong></div>
-<div class="stat"><small>Candidats éligibles</small><strong id="eligibleCount">0</strong></div>
-</div>
-<div id="status" class="status">Connexion au backend CART3R…</div>
-<div class="row"><button id="refresh">Actualiser maintenant</button><span id="updated" class="muted">En attente des données…</span></div>
+ <div class="sectionhead"><h2>Vue d'ensemble</h2><span class="tiny muted" id="uptime">Démarrage : —</span></div>
+ <div class="stats">
+  <div class="stat"><span>État scanner</span><strong id="scanner">—</strong></div>
+  <div class="stat"><span>Pools détectés</span><strong id="poolCount">0 / 100</strong></div>
+  <div class="stat"><span>Candidats éligibles</span><strong id="eligibleCount">0</strong></div>
+  <div class="stat"><span>Prochaine analyse</span><strong id="nextScan">—</strong></div>
+ </div>
+ <div class="status" id="connection">Connexion au backend Render…</div>
+ <div class="actions"><button id="refresh">Actualiser</button><span class="tiny muted" id="updated">Actualisation automatique toutes les 15 secondes</span></div>
 </section>
 <section class="panel">
-<h2>Filtres des candidats</h2>
-<div class="filters">
-<div><label for="minSwaps">Swaps minimum</label><input id="minSwaps" type="number" min="0" value="5"></div>
-<div><label for="minBuyers">Acheteurs distincts minimum</label><input id="minBuyers" type="number" min="0" value="2"></div>
-<div><label for="maxLoss">Perte aller-retour maximum (%)</label><input id="maxLoss" type="number" min="0" step="0.1" value="8"></div>
-</div>
-<div class="muted" style="margin-top:10px">Les filtres sont indicatifs et s'appliquent aux données observées par le backend depuis son démarrage.</div>
+ <div class="sectionhead"><h2>Activité des sources</h2><span class="tiny muted">État des connexions</span></div>
+ <div class="stats">
+  <div class="stat"><span>Helius WebSocket</span><strong id="helius">—</strong></div>
+  <div class="stat"><span>Abonnements</span><strong id="subs">—</strong></div>
+  <div class="stat"><span>Jupiter API</span><strong id="jupiter">—</strong></div>
+  <div class="stat"><span>Cooldown Jupiter</span><strong id="cooldown">—</strong></div>
+ </div>
+ <div class="pooldetails" id="diagnostics">Diagnostics en attente…</div>
 </section>
 <section class="panel">
-<h2>Candidats Helius</h2>
-<div class="stats">
-<div class="stat"><small>Affichés</small><strong id="shownCount">0</strong></div>
-<div class="stat"><small>DEX observés</small><strong id="dexCount">0</strong></div>
-<div class="stat"><small>Pression acheteuse moyenne</small><strong id="avgPressure">—</strong></div>
-<div class="stat"><small>Meilleur score</small><strong id="bestScore">—</strong></div>
-</div>
-<div id="poolList" class="empty">Aucun candidat chargé.</div>
+ <div class="sectionhead"><h2>Filtrer les opportunités</h2><span class="tiny muted">Tri par score</span></div>
+ <div class="filters">
+  <div><label for="minSwaps">Swaps minimum</label><input id="minSwaps" type="number" min="0" value="5"></div>
+  <div><label for="minBuyers">Acheteurs minimum</label><input id="minBuyers" type="number" min="0" value="2"></div>
+  <div><label for="maxLoss">Perte aller-retour max (%)</label><input id="maxLoss" type="number" min="0" step=".1" value="8"></div>
+ </div>
+ <p class="tiny muted">Seuls les candidats déclarés éligibles par le backend et sans risque signalé sont affichés. Les filtres ne modifient pas le scanner.</p>
 </section>
 <section class="panel">
-<h2>Protection et limites</h2>
-<div class="status safe">MODE TEST CONFIRMÉ : aucun achat, aucune vente et aucune signature Phantom ne sont possibles depuis cette interface.</div>
-<div class="status warn">La liquidité exacte n'est pas vérifiée par le backend. Une cotation Jupiter aller-retour indique seulement qu'une route de cotation existe à cet instant ; elle ne garantit ni l'exécution ni le prix de revente.</div>
-<div id="diagnostics" class="details">Diagnostic en attente.</div>
+ <div class="sectionhead"><h2>Opportunités détectées</h2><span class="tiny muted" id="shown">0 résultat</span></div>
+ <div id="poolList" class="empty">Chargement des pools…</div>
 </section>
-</main>
+<section class="panel">
+ <h2>Journal & sécurité</h2>
+ <div class="status ok">MODE TEST CONFIRMÉ — cette interface est en lecture seule. Aucun ordre, achat, vente ou signature Phantom ne peut être déclenché ici.</div>
+ <div class="status warn">Les swaps et volumes correspondent uniquement aux transactions observées par le scanner depuis son démarrage. Une cotation Jupiter n'est pas une garantie d'exécution. La liquidité estimée n'est pas une valeur de revente garantie.</div>
+ <div class="pooldetails" id="errors">Aucune donnée de diagnostic chargée.</div>
+</section>
+<div class="foot">CART3R.JAILBREAK · Données fournies par le backend Render · Rafraîchissement 15 s<br>Ne constitue pas un conseil financier.</div>
+</main></div>
 <script>
 'use strict';
 const API='https://cart3r-solana.onrender.com';
-let statusData=null,poolsData=[],busy=false;
 const $=id=>document.getElementById(id);
-function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function n(v){const x=Number(v);return Number.isFinite(x)?x:0;}
-function pct(v){return v==null?'—':n(v).toFixed(1)+' %';}
-function age(v){if(!v)return 'jamais';const ms=Date.now()-new Date(v).getTime();if(!Number.isFinite(ms))return 'inconnue';return Math.max(0,Math.floor(ms/1000))+' s';}
-function filtered(){
- const swaps=Math.max(0,n($('minSwaps').value)),buyers=Math.max(0,n($('minBuyers').value)),loss=Math.max(0,n($('maxLoss').value));
- return poolsData.filter(p=>n(p.activityCount)>=swaps&&n(p.buyersCount)>=buyers&&p.roundTripLossPct!=null&&n(p.roundTripLossPct)<=loss&&p.eligible===true&&Array.isArray(p.risks)&&p.risks.length===0)
- .sort((a,b)=>n(b.score)-n(a.score)||n(b.activityCount)-n(a.activityCount));
+let statusData=null,poolsData=[],busy=false;
+const num=v=>{const n=Number(v);return Number.isFinite(n)?n:0};
+const safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=(v,d=1)=>v==null?'—':num(v).toFixed(d);
+const age=t=>{if(!t)return'—';const n=Date.now()-new Date(t).getTime();return Number.isFinite(n)?Math.max(0,Math.floor(n/1000))+' s':'—'};
+function candidates(){
+ const swaps=Math.max(0,num($('minSwaps').value)),buyers=Math.max(0,num($('minBuyers').value)),loss=Math.max(0,num($('maxLoss').value));
+ return poolsData.filter(p=>p.eligible===true&&Array.isArray(p.risks)&&p.risks.length===0&&num(p.activityCount)>=swaps&&num(p.buyersCount)>=buyers&&p.roundTripLossPct!=null&&num(p.roundTripLossPct)<=loss).sort((a,b)=>num(b.score)-num(a.score));
 }
-function render(){
- const items=filtered();
- $('poolCount').textContent=statusData?.poolsFound??poolsData.length;
- $('eligibleCount').textContent=statusData?.eligiblePools??poolsData.filter(p=>p.eligible).length;
- $('shownCount').textContent=items.length;
- $('dexCount').textContent=new Set(items.map(p=>p.dex).filter(Boolean)).size;
- $('avgPressure').textContent=items.length?pct(items.reduce((s,p)=>s+n(p.buyPressure),0)/items.length):'—';
- $('bestScore').textContent=items.length?n(items[0].score)+' / 100':'—';
- if(!items.length){$('poolList').innerHTML='<div class="empty">Aucun candidat ne satisfait actuellement tous les filtres. Cela ne signifie pas qu’aucun token ne se négocie.</div>';return;}
- $('poolList').innerHTML=items.map(p=>{
-  const quote=p.quotes||{},security=p.security||{},risks=Array.isArray(p.risks)?p.risks:[];
-  const quoteText=quote.buyOk&&quote.sellOk?'Achat et revente cotés':(quote.error||'Cotation indisponible');
-  const riskText=risks.length?risks.join(' • '):'Aucun risque détecté par les contrôles effectués';
-  const addr=p.mint||p.address||'';
-  return '<article class="pool"><div class="poolhead"><span class="token">'+esc(p.name||p.symbol||'Token inconnu')+' '+(p.symbol?'('+esc(p.symbol)+')':'')+'</span><span class="pill">Score '+n(p.score)+'/100</span></div>'+
-   '<div class="details">DEX : '+esc(p.dex||'inconnu')+' • Activité observée : '+n(p.activityCount)+' swaps sur 15 min • Acheteurs : '+n(p.buyersCount)+'</div>'+
-   '<div class="details">Pression acheteuse : '+pct(p.buyPressure)+' • Achats : '+n(p.buyCount)+' • Ventes : '+n(p.sellCount)+'</div>'+
-   '<div class="details">Test Jupiter : '+esc(quoteText)+' • Perte aller-retour estimée : '+pct(p.roundTripLossPct)+'</div>'+
-   '<div class="details">Sécurité mint : '+(security.checked?'contrôlée':'non vérifiée')+' • Liquidité : non vérifiée</div>'+
-   '<div class="details">Contrôles : '+esc(riskText)+'</div>'+
-   '<div class="details">Adresse : <a href="https://solscan.io/token/'+encodeURIComponent(addr)+'" target="_blank" rel="noopener noreferrer">'+esc(addr)+'</a></div></article>';
+function renderPools(){
+ const rows=candidates();$('shown').textContent=rows.length+' résultat(s) éligible(s)';
+ if(!rows.length){$('poolList').innerHTML='<div class="empty">Aucune opportunité ne satisfait actuellement ces critères. Le scanner peut fonctionner normalement sans candidat éligible : ses contrôles de sécurité et de liquidité sont volontairement stricts.</div>';return;}
+ $('poolList').innerHTML=rows.map(p=>{
+  const q=p.quotes||{},sec=p.security||{},ladder=Array.isArray(q.quoteLadder)?q.quoteLadder:[];
+  const mint=p.mint||p.address||'';
+  const quote=q.buyOk&&q.sellOk?'Achat + revente cotés':'Cotation incomplète';
+  const risk=(p.risks||[]).join(' · ')||'Aucun risque signalé par les contrôles actifs';
+  return '<article class="pool"><div class="pooltop"><div><div class="name">'+safe(p.name||'Token sans nom')+' '+(p.symbol?'('+safe(p.symbol)+')':'')+'</div><span class="pill good">'+safe(p.dex||'DEX inconnu')+'</span><span class="pill">Éligible</span></div><div class="score">'+num(p.score)+'/100</div></div>'+
+  '<div class="gridinfo"><div class="datum"><small>Activité · 15 min</small><b>'+num(p.activityCount)+' swaps</b></div><div class="datum"><small>Acheteurs</small><b>'+num(p.buyersCount)+'</b></div><div class="datum"><small>Pression acheteuse</small><b>'+fmt(p.buyPressure,1)+' %</b></div><div class="datum"><small>Liquidité estimée</small><b>'+(p.liquiditySol==null?'—':fmt(p.liquiditySol,2)+' SOL')+'</b></div><div class="datum"><small>Volume observé</small><b>'+(p.volumeSol==null?'—':fmt(p.volumeSol,3)+' SOL')+'</b></div><div class="datum"><small>Perte aller-retour</small><b>'+fmt(p.roundTripLossPct,2)+' %</b></div></div>'+
+  '<div class="pooldetails">Cotation Jupiter : '+safe(quote)+' · Sécurité mint : '+(sec.checked?'contrôlée':'non vérifiée')+' · Liquidité on-chain : '+(p.liquidityVerified?'vérifiée':'non vérifiée')+'<br>Grille de cotations : '+ladder.map(x=>fmt(x.inputSol,2)+' SOL → perte '+fmt(x.roundTripLossPct,2)+' %').join(' / ')+'<br>Contrôles : '+safe(risk)+'<br>Mint : <a href="https://solscan.io/token/'+encodeURIComponent(mint)+'" target="_blank" rel="noopener noreferrer">'+safe(mint)+'</a> · <a href="https://solscan.io/account/'+encodeURIComponent(p.poolAddress||mint)+'" target="_blank" rel="noopener noreferrer">Pool / compte</a><br>Dernier swap : '+age(p.lastSwapAt)+' · Vérifié : '+age(p.checkedAt)+'</div></article>';
  }).join('');
 }
 async function load(){
  if(busy)return;busy=true;$('refresh').disabled=true;
  try{
-  const [sr,pr]=await Promise.all([fetch(API+'/status',{cache:'no-store'}),fetch(API+'/pools',{cache:'no-store'})]);
-  if(!sr.ok)throw new Error('Status HTTP '+sr.status);
-  if(!pr.ok)throw new Error('Pools HTTP '+pr.status);
-  const s=await sr.json(),p=await pr.json();
-  if(s.realTrading!==false||s.mode!=='TEST'||p.realTrading!==false)throw new Error('Le backend ne confirme pas le mode TEST : affichage bloqué.');
+  const [a,b]=await Promise.all([fetch(API+'/status',{cache:'no-store'}),fetch(API+'/pools',{cache:'no-store'})]);
+  if(!a.ok)throw Error('/status HTTP '+a.status);if(!b.ok)throw Error('/pools HTTP '+b.status);
+  const s=await a.json(),p=await b.json();
+  if(s.mode!=='TEST'||s.realTrading!==false||p.realTrading!==false)throw Error('Mode TEST non confirmé : données bloquées.');
   statusData=s;poolsData=Array.isArray(p.pools)?p.pools:[];
-  $('mode').textContent=s.mode;$('scanner').textContent=s.scanner||'—';
-  $('status').className='status '+(s.running&&s.helius?.connected?'safe':'warn');
-  $('status').textContent='Backend : '+(s.running?'actif':'arrêté')+' • Helius : '+(s.helius?.connected?'connecté':'non connecté')+' • Jupiter : '+(s.jupiter?.configured?'configuré':'non configuré')+' • Dernière activité : '+age(s.lastUpdate)+'.';
-  $('updated').textContent='Actualisé à '+new Date().toLocaleTimeString('fr-FR');
-  $('diagnostics').textContent='Dernière erreur scanner : '+(s.lastError||'aucune')+' • Erreur Helius : '+(s.helius?.lastError||'aucune')+' • Erreur Jupiter : '+(s.jupiter?.lastError||'aucune')+'. Les données sont limitées à ce que le backend a observé depuis son démarrage.';
-  render();
- }catch(e){
-  $('status').className='status bad';$('status').textContent='Connexion au backend impossible : '+(e.message||e);
-  $('diagnostics').textContent='Vérifie que le service Render est démarré et que le déploiement est terminé. Les données ne sont pas présentées comme à jour.';
- }finally{busy=false;$('refresh').disabled=false;}
+  $('scanner').textContent=s.scanner||'—';$('scanner').className=s.scanner==='LIVE'?'green':'amber';
+  $('poolCount').textContent=(s.poolsFound??p.count??poolsData.length)+' / 100';$('eligibleCount').textContent=s.eligiblePools??0;
+  $('nextScan').textContent=s.scanning?'En cours':(s.nextScanInSeconds??'—')+' s';
+  $('uptime').textContent='Depuis '+(s.startedAt?new Date(s.startedAt).toLocaleTimeString('fr-FR'):'—');
+  $('helius').textContent=s.helius?.connected?'CONNECTÉ':'HORS LIGNE';$('helius').className=s.helius?.connected?'green':'amber';
+  $('subs').textContent=(s.helius?.subscriptions??0)+' / '+(s.discovery?.feeds??0);
+  $('jupiter').textContent=s.jupiter?.configured?'CONFIGURÉ':'ABSENT';$('jupiter').className=s.jupiter?.configured?'green':'amber';
+  $('cooldown').textContent=(s.jupiter?.cooldownSeconds??0)+' s';
+  const c=$('connection');c.className='status '+(s.running&&s.helius?.connected?'ok':'warn');
+  c.textContent='Render : '+(s.running?'service actif':'scanner arrêté')+' · Helius : '+(s.helius?.connected?'WebSocket connecté':'connexion non confirmée')+' · Dernière mise à jour scanner : '+age(s.lastUpdate);
+  $('diagnostics').textContent='Transactions vues : '+num(s.helius?.transactionsSeen)+' · Swaps décodés : '+num(s.helius?.swapsDecoded)+' · Reconnexions : '+num(s.helius?.reconnects)+' · Retries RPC 429 : '+num(s.helius?.rpc429Retries)+' · Requêtes Jupiter : '+num(s.jupiter?.checksCount)+' · 429 Jupiter : '+num(s.jupiter?.rateLimitHits)+' · File Jupiter : '+num(s.jupiter?.queueDepth);
+  $('errors').textContent='Erreur scanner : '+(s.lastError||'aucune')+' · Erreur Helius : '+(s.helius?.lastError||'aucune')+' · Erreur Jupiter : '+(s.jupiter?.lastError||'aucune')+' · Dernier événement : '+(s.discovery?.lastCheck||'—');
+  $('updated').textContent='Mis à jour à '+new Date().toLocaleTimeString('fr-FR');
+  renderPools();
+ }catch(e){$('connection').className='status err';$('connection').textContent='Connexion impossible : '+(e.message||e);$('errors').textContent='Les données ne sont pas à jour. Vérifie le service Render et son déploiement.';}
+ finally{busy=false;$('refresh').disabled=false;}
 }
-$('refresh').addEventListener('click',load);
-['minSwaps','minBuyers','maxLoss'].forEach(id=>$(id).addEventListener('input',render));
+$('refresh').addEventListener('click',load);['minSwaps','minBuyers','maxLoss'].forEach(id=>$(id).addEventListener('input',renderPools));
 load();setInterval(load,15000);
-</script>
-</body>
-</html>
+</script></body></html>
