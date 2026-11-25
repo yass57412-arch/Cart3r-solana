@@ -1,11 +1,11 @@
 "use strict";
 
 /**
- * CART3R.JAILBREAK — Helius on-chain scanner (TEST ONLY)
- * - No GeckoTerminal, no Pump.fun feed, no wallet signing, no transactions sent.
- * - Uses standard Helius logsSubscribe WebSockets (one mention subscription per DEX program).
- * - Fetches confirmed swap transactions and derives observed wallet token deltas.
- * - Uses Jupiter Swap V2 order quotes only to test a small buy -> sell round trip.
+ * CART3R.JAILBREAK — Helius scanner + wallet-signed Jupiter Swap V2 API.
+ * - Scanner and candidate analysis remain read-only.
+ * - Real swaps require a fresh Jupiter order and an explicit Phantom wallet signature.
+ * - The server never stores private keys or signs transactions for users.
+ * - Uses Helius logsSubscribe WebSockets and confirmed swap transaction decoding.
  *
  * Important: activity/volume below is ONLY what this process has observed since it started.
  * Verified CPMM quote-side reserves are read on-chain; estimated total liquidity is labeled as an estimate.
@@ -1027,8 +1027,8 @@ app.get("/", (_req, res) => res.json({
   version: "HELIUS-ONCHAIN-1",
   mode: "TEST",
   realTrading: false,
-  message: "Scanner Helius on-chain actif. Aucun ordre réel n'est exécuté.",
-  endpoints: ["/health", "/status", "/pools", "/security", "/helius-test", "/jupiter-test", "/gecko-test", "/test/start", "/test/stop"]
+  message: "Scanner Helius en lecture seule. Les swaps réels sont assemblés par Jupiter et nécessitent une signature Phantom explicite.",
+  endpoints: ["/health", "/status", "/pools", "/wallet", "/trade/quote", "/trade/order", "/trade/execute", "/security", "/helius-test", "/jupiter-test", "/gecko-test", "/test/start", "/test/stop"]
 }));
 
 app.get("/health", (_req, res) => res.json({ ok: true, service: "CART3R", mode: "TEST", realTrading: false }));
@@ -1057,11 +1057,12 @@ app.get("/wallet", tradeLimit, async (req, res) => {
   const address = String(req.query.address || "");
   if (!validBase58(address)) return res.status(400).json({ok:false,error:"Adresse wallet invalide"});
   try {
-    const [lamports, accounts] = await Promise.all([
+    const [lamports, legacyAccounts, token2022Accounts] = await Promise.all([
       heliusRpc("getBalance", [address, { commitment:"confirmed" }]),
-      heliusRpc("getTokenAccountsByOwner", [address, { programId:TOKEN_PROGRAM }, { encoding:"jsonParsed", commitment:"confirmed" }])
+      heliusRpc("getTokenAccountsByOwner", [address, { programId:TOKEN_PROGRAM }, { encoding:"jsonParsed", commitment:"confirmed" }]),
+      heliusRpc("getTokenAccountsByOwner", [address, { programId:TOKEN_2022_PROGRAM }, { encoding:"jsonParsed", commitment:"confirmed" }])
     ]);
-    const tokens = (accounts?.value || []).map(row => {
+    const tokens = [...(legacyAccounts?.value || []), ...(token2022Accounts?.value || [])].map(row => {
       const info = row.account?.data?.parsed?.info;
       const amount = info?.tokenAmount || {};
       return { mint:info?.mint, amount:amount.amount || "0", uiAmount:amount.uiAmountString || amount.uiAmount || "0", decimals:Number(amount.decimals || 0), tokenAccount:row.pubkey };
