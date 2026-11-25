@@ -42,6 +42,30 @@ const API='https://cart3r-solana.onrender.com';
 const SOL='So11111111111111111111111111111111111111112';
 const $=id=>document.getElementById(id);
 const state={pools:[]};
+function setTab(name){
+  const valid=['scanner','simulation'];
+  if(!valid.includes(name))return;
+  valid.forEach(tab=>{
+    const section=$('tab-'+tab);
+    if(section)section.classList.toggle('hidden',tab!==name);
+  });
+  document.querySelectorAll('nav [data-tab]').forEach(button=>{
+    const active=button.dataset.tab===name;
+    button.classList.toggle('active',active);
+    button.setAttribute('aria-pressed',String(active));
+  });
+}
+document.querySelectorAll('nav [data-tab]').forEach(button=>{
+  button.addEventListener('click',()=>setTab(button.dataset.tab));
+});
+$('refresh').addEventListener('click',async()=>{
+  const button=$('refresh');
+  button.disabled=true;
+  button.textContent='Actualisation…';
+  try{await refreshScanner()}
+  finally{button.disabled=false;button.textContent='Actualiser'}
+});
+
 const fmt=(n,d=4)=>n==null||!Number.isFinite(Number(n))?'—':Number(n).toFixed(d);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const short=s=>s?String(s).slice(0,5)+'…'+String(s).slice(-5):'—';
