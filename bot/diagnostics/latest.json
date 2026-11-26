@@ -1,5 +1,5 @@
 {
-  "retrievedAt": "2026-11-26T12:52:01.501Z",
+  "retrievedAt": "2026-11-26T14:09:37.259Z",
   "source": {
     "status": "/status",
     "pools": "/pools"
@@ -9,33 +9,33 @@
     "mode": "TEST",
     "realTrading": false,
     "scanner": "LIVE",
-    "poolsFound": 0,
-    "catalogPools": 0,
+    "poolsFound": 1,
+    "catalogPools": 1,
     "eligiblePools": 0,
-    "lastUpdate": null,
+    "lastUpdate": "2026-11-26T14:09:37.070Z",
     "lastError": null,
     "scanning": false,
     "nextScanInSeconds": 45,
-    "startedAt": "2026-11-26T12:51:58.754Z",
+    "startedAt": "2026-11-26T14:09:31.954Z",
     "discovery": {
       "provider": "HELIUS_LOGS_WEBSOCKET",
       "feeds": 2,
       "callsCount": 2,
-      "successCount": 0,
+      "successCount": 1,
       "failureCount": 0,
-      "lastCheck": "2026-11-26T12:51:59.372Z",
+      "lastCheck": "2026-11-26T14:09:37.070Z",
       "lastError": null,
-      "cachedFeeds": 0
+      "cachedFeeds": 1
     },
     "helius": {
       "configured": true,
       "connected": true,
       "subscriptions": 2,
-      "lastCheck": null,
-      "lastSlot": null,
+      "lastCheck": "2026-11-26T14:09:37.069Z",
+      "lastSlot": 474176466,
       "lastError": null,
-      "transactionsSeen": 0,
-      "swapsDecoded": 0,
+      "transactionsSeen": 3,
+      "swapsDecoded": 1,
       "reconnects": 0,
       "rpc429Retries": 0,
       "droppedQueuedTransactions": 0
