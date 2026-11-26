@@ -1,5 +1,5 @@
 {
-  "retrievedAt": "2026-11-26T14:09:37.259Z",
+  "retrievedAt": "2026-11-26T15:14:48.943Z",
   "source": {
     "status": "/status",
     "pools": "/pools"
@@ -12,18 +12,18 @@
     "poolsFound": 1,
     "catalogPools": 1,
     "eligiblePools": 0,
-    "lastUpdate": "2026-11-26T14:09:37.070Z",
+    "lastUpdate": "2026-11-26T15:14:47.202Z",
     "lastError": null,
     "scanning": false,
     "nextScanInSeconds": 45,
-    "startedAt": "2026-11-26T14:09:31.954Z",
+    "startedAt": "2026-11-26T15:14:46.000Z",
     "discovery": {
       "provider": "HELIUS_LOGS_WEBSOCKET",
       "feeds": 2,
       "callsCount": 2,
       "successCount": 1,
       "failureCount": 0,
-      "lastCheck": "2026-11-26T14:09:37.070Z",
+      "lastCheck": "2026-11-26T15:14:47.202Z",
       "lastError": null,
       "cachedFeeds": 1
     },
@@ -31,8 +31,8 @@
       "configured": true,
       "connected": true,
       "subscriptions": 2,
-      "lastCheck": "2026-11-26T14:09:37.069Z",
-      "lastSlot": 474176466,
+      "lastCheck": "2026-11-26T15:14:47.498Z",
+      "lastSlot": 474194618,
       "lastError": null,
       "transactionsSeen": 3,
       "swapsDecoded": 1,
@@ -68,8 +68,47 @@
       "realTrading": false
     }
   },
-  "count": 0,
+  "count": 1,
   "eligibleCount": 0,
   "liquidityVerifiedCount": 0,
-  "pools": []
+  "pools": [
+    {
+      "mint": "2s9ycNwMgVCB4SWtXmTu14w1ospd88MVYZdHLVEHLdVC",
+      "poolAddress": null,
+      "name": "Skynet",
+      "symbol": "SKYNET",
+      "dex": "DEX Solana",
+      "liquidityVerified": false,
+      "liquiditySol": null,
+      "estimatedLiquiditySol": null,
+      "quoteReserveSol": null,
+      "quoteLiquidity": null,
+      "quoteMint": null,
+      "volumeSol": 0,
+      "volumeUsd": 40.339304,
+      "activityCount": 1,
+      "buyCount": 1,
+      "sellCount": 0,
+      "buyersCount": 1,
+      "buyPressure": 100,
+      "buyPressureByVolume": null,
+      "buyVolumeSol": 0,
+      "sellVolumeSol": 0,
+      "score": 0,
+      "eligible": false,
+      "checkedAt": null,
+      "securityChecked": false,
+      "securityRisks": [],
+      "risks": [
+        "Analyse en cours"
+      ],
+      "quotes": {
+        "buyOk": false,
+        "sellOk": false,
+        "roundTripLossPct": null,
+        "error": null,
+        "quoteLadder": []
+      }
+    }
+  ]
 }
