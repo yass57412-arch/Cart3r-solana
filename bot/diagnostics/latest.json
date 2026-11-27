@@ -1,5 +1,5 @@
 {
-  "retrievedAt": "2026-11-27T04:51:29.457Z",
+  "retrievedAt": "2026-11-27T05:52:03.549Z",
   "source": {
     "status": "/status",
     "pools": "/pools"
@@ -16,14 +16,14 @@
     "lastError": null,
     "scanning": false,
     "nextScanInSeconds": 45,
-    "startedAt": "2026-11-27T04:51:27.703Z",
+    "startedAt": "2026-11-27T05:52:02.181Z",
     "discovery": {
       "provider": "HELIUS_LOGS_WEBSOCKET",
       "feeds": 2,
       "callsCount": 2,
       "successCount": 0,
       "failureCount": 0,
-      "lastCheck": "2026-11-27T04:51:28.299Z",
+      "lastCheck": "2026-11-27T05:52:02.784Z",
       "lastError": null,
       "cachedFeeds": 0
     },
@@ -31,8 +31,8 @@
       "configured": true,
       "connected": true,
       "subscriptions": 2,
-      "lastCheck": "2026-11-27T04:51:29.296Z",
-      "lastSlot": 474422649,
+      "lastCheck": "2026-11-27T05:52:03.183Z",
+      "lastSlot": 474439516,
       "lastError": null,
       "transactionsSeen": 2,
       "swapsDecoded": 0,
