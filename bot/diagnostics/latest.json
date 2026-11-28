@@ -1,5 +1,5 @@
 {
-  "retrievedAt": "2026-11-28T09:42:17.858Z",
+  "retrievedAt": "2026-11-28T10:37:39.762Z",
   "source": {
     "status": "/status",
     "pools": "/pools"
@@ -9,33 +9,33 @@
     "mode": "TEST",
     "realTrading": false,
     "scanner": "LIVE",
-    "poolsFound": 0,
-    "catalogPools": 0,
+    "poolsFound": 1,
+    "catalogPools": 1,
     "eligiblePools": 0,
-    "lastUpdate": null,
+    "lastUpdate": "2026-11-28T10:37:39.388Z",
     "lastError": null,
     "scanning": false,
     "nextScanInSeconds": 45,
-    "startedAt": "2026-11-28T09:42:15.212Z",
+    "startedAt": "2026-11-28T10:37:37.982Z",
     "discovery": {
       "provider": "HELIUS_LOGS_WEBSOCKET",
       "feeds": 2,
       "callsCount": 2,
-      "successCount": 0,
+      "successCount": 1,
       "failureCount": 0,
-      "lastCheck": "2026-11-28T09:42:15.721Z",
+      "lastCheck": "2026-11-28T10:37:39.388Z",
       "lastError": null,
-      "cachedFeeds": 0
+      "cachedFeeds": 1
     },
     "helius": {
       "configured": true,
       "connected": true,
       "subscriptions": 2,
-      "lastCheck": "2026-11-28T09:42:16.413Z",
-      "lastSlot": 474906339,
+      "lastCheck": "2026-11-28T10:37:39.385Z",
+      "lastSlot": 474921893,
       "lastError": null,
-      "transactionsSeen": 1,
-      "swapsDecoded": 0,
+      "transactionsSeen": 2,
+      "swapsDecoded": 1,
       "reconnects": 0,
       "rpc429Retries": 0,
       "droppedQueuedTransactions": 0
@@ -68,8 +68,47 @@
       "realTrading": false
     }
   },
-  "count": 0,
+  "count": 1,
   "eligibleCount": 0,
   "liquidityVerifiedCount": 0,
-  "pools": []
+  "pools": [
+    {
+      "mint": "B89Hd5Juz7JP2dxCZXFJWk4tMTcbw7feDhuWGb3kq5qE",
+      "poolAddress": "E1wnaH2ZQvcB5hDWZe4JpivpjByLGP4uwFcMZb25FH3Y",
+      "name": "Token B89Hd5…q5qE",
+      "symbol": "B89HD",
+      "dex": "DEX Solana",
+      "liquidityVerified": false,
+      "liquiditySol": null,
+      "estimatedLiquiditySol": null,
+      "quoteReserveSol": null,
+      "quoteLiquidity": null,
+      "quoteMint": "So11111111111111111111111111111111111111112",
+      "volumeSol": 0.424504,
+      "volumeUsd": null,
+      "activityCount": 1,
+      "buyCount": 0,
+      "sellCount": 1,
+      "buyersCount": 0,
+      "buyPressure": 0,
+      "buyPressureByVolume": 0,
+      "buyVolumeSol": 0,
+      "sellVolumeSol": 0.424504,
+      "score": 0,
+      "eligible": false,
+      "checkedAt": null,
+      "securityChecked": false,
+      "securityRisks": [],
+      "risks": [
+        "Analyse en cours"
+      ],
+      "quotes": {
+        "buyOk": false,
+        "sellOk": false,
+        "roundTripLossPct": null,
+        "error": null,
+        "quoteLadder": []
+      }
+    }
+  ]
 }
