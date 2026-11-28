@@ -1,5 +1,5 @@
 {
-  "retrievedAt": "2026-11-28T08:51:59.949Z",
+  "retrievedAt": "2026-11-28T09:42:17.858Z",
   "source": {
     "status": "/status",
     "pools": "/pools"
@@ -9,33 +9,33 @@
     "mode": "TEST",
     "realTrading": false,
     "scanner": "LIVE",
-    "poolsFound": 2,
-    "catalogPools": 2,
+    "poolsFound": 0,
+    "catalogPools": 0,
     "eligiblePools": 0,
-    "lastUpdate": "2026-11-28T08:51:59.846Z",
+    "lastUpdate": null,
     "lastError": null,
     "scanning": false,
     "nextScanInSeconds": 45,
-    "startedAt": "2026-11-28T08:51:55.976Z",
+    "startedAt": "2026-11-28T09:42:15.212Z",
     "discovery": {
       "provider": "HELIUS_LOGS_WEBSOCKET",
       "feeds": 2,
       "callsCount": 2,
-      "successCount": 4,
+      "successCount": 0,
       "failureCount": 0,
-      "lastCheck": "2026-11-28T08:51:59.846Z",
+      "lastCheck": "2026-11-28T09:42:15.721Z",
       "lastError": null,
-      "cachedFeeds": 2
+      "cachedFeeds": 0
     },
     "helius": {
       "configured": true,
       "connected": true,
       "subscriptions": 2,
-      "lastCheck": "2026-11-28T08:51:59.846Z",
-      "lastSlot": 474892257,
+      "lastCheck": "2026-11-28T09:42:16.413Z",
+      "lastSlot": 474906339,
       "lastError": null,
-      "transactionsSeen": 6,
-      "swapsDecoded": 4,
+      "transactionsSeen": 1,
+      "swapsDecoded": 0,
       "reconnects": 0,
       "rpc429Retries": 0,
       "droppedQueuedTransactions": 0
@@ -68,85 +68,8 @@
       "realTrading": false
     }
   },
-  "count": 2,
+  "count": 0,
   "eligibleCount": 0,
   "liquidityVerifiedCount": 0,
-  "pools": [
-    {
-      "mint": "8i2ssMZBaS3HShu5hoDEV4tVLf5RGXeNJnK3LNTHTH9e",
-      "poolAddress": "D68Dez4Zyi5agvSiTfgEX6jsBpkMVScTSp63ULUixJ5y",
-      "name": "Commodities",
-      "symbol": "COMM",
-      "dex": "DEX Solana",
-      "liquidityVerified": false,
-      "liquiditySol": null,
-      "estimatedLiquiditySol": null,
-      "quoteReserveSol": null,
-      "quoteLiquidity": null,
-      "quoteMint": "So11111111111111111111111111111111111111112",
-      "volumeSol": 0.478125,
-      "volumeUsd": 20.001516000000002,
-      "activityCount": 3,
-      "buyCount": 3,
-      "sellCount": 0,
-      "buyersCount": 3,
-      "buyPressure": 100,
-      "buyPressureByVolume": 100,
-      "buyVolumeSol": 0.478125,
-      "sellVolumeSol": 0,
-      "score": 0,
-      "eligible": false,
-      "checkedAt": null,
-      "securityChecked": false,
-      "securityRisks": [],
-      "risks": [
-        "Analyse en cours"
-      ],
-      "quotes": {
-        "buyOk": false,
-        "sellOk": false,
-        "roundTripLossPct": null,
-        "error": null,
-        "quoteLadder": []
-      }
-    },
-    {
-      "mint": "BzywULhF8ZCA8iJfdybAjF6Y6fwtBu4vCWzz96BJQmrz",
-      "poolAddress": null,
-      "name": "RiceCoin",
-      "symbol": "Rice",
-      "dex": "DEX Solana",
-      "liquidityVerified": false,
-      "liquiditySol": null,
-      "estimatedLiquiditySol": null,
-      "quoteReserveSol": null,
-      "quoteLiquidity": null,
-      "quoteMint": null,
-      "volumeSol": 0,
-      "volumeUsd": 0.773582,
-      "activityCount": 1,
-      "buyCount": 0,
-      "sellCount": 1,
-      "buyersCount": 0,
-      "buyPressure": 0,
-      "buyPressureByVolume": null,
-      "buyVolumeSol": 0,
-      "sellVolumeSol": 0,
-      "score": 0,
-      "eligible": false,
-      "checkedAt": null,
-      "securityChecked": false,
-      "securityRisks": [],
-      "risks": [
-        "Analyse en cours"
-      ],
-      "quotes": {
-        "buyOk": false,
-        "sellOk": false,
-        "roundTripLossPct": null,
-        "error": null,
-        "quoteLadder": []
-      }
-    }
-  ]
+  "pools": []
 }
